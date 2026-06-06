@@ -9,13 +9,12 @@
  *                configured strategy.
  *   shutdown() — no-op; the in-memory driver is GC'd with the container.
  *
- * Typed against the framework's real `AppContext` / `Router` / `HttpContext`
- * via `import type` (erased at runtime) — same SDK and syntax as the host.
- * `@c9up/ream` stays an optional runtime peer (host-provided) and a build-only
- * devDependency for the types, mirroring an AdonisJS extension package.
+ * The provider is structurally typed against an `AppContext`-compatible
+ * shape rather than importing `AppContext` from `@c9up/ream` at the type
+ * level. Same pattern as Atlas (cerebrum 2026-04-30) — keeps the runtime
+ * peer dependency intact while letting the package compile in isolation.
  */
 
-import type { AppContext, HttpContext, Router } from "@c9up/ream";
 import type { NovaConfig } from "./config.js";
 import { Nova } from "./Nova.js";
 import { SubscribeController } from "./SubscribeController.js";
@@ -28,11 +27,34 @@ import { _setPush } from "./services/main.js";
 const SUBSCRIPTION_STORE_TOKEN = "SubscriptionStore";
 const NOVA_TOKEN = "nova";
 
+interface ContainerLike {
+	singleton(token: string | symbol, factory: () => unknown): void;
+	resolve<T = unknown>(token: string | symbol): T;
+	has?(token: string | symbol): boolean;
+}
+
+interface ConfigStoreLike {
+	get<T = unknown>(key: string): T | undefined;
+}
+
+interface RouteBuilderLike {
+	guard(...guards: string[]): RouteBuilderLike;
+}
+
+interface RouterLike {
+	post(path: string, handler: (ctx: unknown) => unknown): RouteBuilderLike;
+}
+
+export interface NovaAppContext {
+	container: ContainerLike;
+	config: ConfigStoreLike;
+}
+
 export default class NovaProvider {
-	#app: AppContext;
+	#app: NovaAppContext;
 	#config: NovaConfig;
 
-	constructor(app: AppContext) {
+	constructor(app: NovaAppContext) {
 		this.#app = app;
 		this.#config = {};
 	}
@@ -79,7 +101,7 @@ export default class NovaProvider {
 
 	async boot(): Promise<void> {
 		_setPush(this.#app.container.resolve<Nova>(NOVA_TOKEN));
-		const router = this.#app.container.resolve<Router>("router");
+		const router = this.#app.container.resolve<RouterLike>("router");
 		const rawPrefix = this.#config.routePrefix;
 		const trimmedPrefix =
 			typeof rawPrefix === "string" ? rawPrefix.replace(/\/+$/, "") : "";
@@ -90,8 +112,8 @@ export default class NovaProvider {
 		);
 		const controller = new SubscribeController(store);
 
-		const route = router.post(path, async (ctx: HttpContext) => {
-			await controller.handle(ctx);
+		const route = router.post(path, async (ctx: unknown) => {
+			await controller.handle(ctx as Parameters<typeof controller.handle>[0]);
 		});
 
 		const guard = this.#config.guard === undefined ? "jwt" : this.#config.guard;

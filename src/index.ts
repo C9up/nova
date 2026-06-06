@@ -12,10 +12,7 @@ export {
 	type PushResult,
 	type PushUrgency,
 } from "./Nova.js";
-export {
-	default as NovaProvider,
-	type NovaAppContext,
-} from "./NovaProvider.js";
+export { default as NovaProvider } from "./NovaProvider.js";
 export { SubscribeController } from "./SubscribeController.js";
 export {
 	MemorySubscriptionDriver,

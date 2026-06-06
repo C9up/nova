@@ -9,23 +9,12 @@
  * route was registered without a guard (test-only — config sets guard=null).
  */
 
+import type { HttpContext } from "@c9up/ream";
 import { NovaError } from "./errors.js";
 import type {
 	PushSubscription,
 	SubscriptionStore,
 } from "./SubscriptionStore.js";
-
-/**
- * Structural slice of the framework `HttpContext` this handler touches —
- * declared locally rather than importing the type from `@c9up/ream`, so nova
- * compiles in isolation while keeping the runtime peer intact. Same pattern
- * as NovaProvider's `ContainerLike` / `RouterLike`.
- */
-interface HttpContextLike {
-	request: { body(): unknown };
-	response: { status(code: number): { json(data: unknown): void } };
-	auth?: { user?: { id?: string } };
-}
 
 const MAX_ENDPOINT_LENGTH = 2048;
 const BASE64URL_CHARS = /^[A-Za-z0-9_-]+$/;
@@ -39,7 +28,7 @@ export class SubscribeController {
 		this.#store = store;
 	}
 
-	async handle(ctx: HttpContextLike): Promise<void> {
+	async handle(ctx: HttpContext): Promise<void> {
 		const subscription = parseSubscription(ctx.request.body());
 		if (!subscription) {
 			ctx.response.status(400).json({

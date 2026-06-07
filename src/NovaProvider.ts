@@ -22,7 +22,7 @@ import {
 	MemorySubscriptionDriver,
 	type SubscriptionStore,
 } from "./SubscriptionStore.js";
-import { _setPush } from "./services/main.js";
+import { setPush } from "./services/main.js";
 
 const SUBSCRIPTION_STORE_TOKEN = "SubscriptionStore";
 const NOVA_TOKEN = "nova";
@@ -100,7 +100,7 @@ export default class NovaProvider {
 	}
 
 	async boot(): Promise<void> {
-		_setPush(this.#app.container.resolve<Nova>(NOVA_TOKEN));
+		setPush(this.#app.container.resolve<Nova>(NOVA_TOKEN));
 		const router = this.#app.container.resolve<RouterLike>("router");
 		const rawPrefix = this.#config.routePrefix;
 		const trimmedPrefix =

@@ -10,28 +10,28 @@
 
 import type { Nova } from "../Nova.js";
 
-let _instance: Nova | undefined;
+let instance: Nova | undefined;
 
 /** @internal Bind the singleton (called by NovaProvider). */
-export function _setPush(instance: Nova): void {
-	_instance = instance;
+export function setPush(value: Nova): void {
+	instance = value;
 }
 
 /** @internal Read the singleton (or `undefined` pre-boot). */
-export function _getPush(): Nova | undefined {
-	return _instance;
+export function getPush(): Nova | undefined {
+	return instance;
 }
 
 const push: Nova = new Proxy({} as Nova, {
 	get(_target, prop) {
-		if (!_instance) {
+		if (!instance) {
 			throw new Error(
 				"[nova] Nova singleton accessed before NovaProvider.boot() ran. " +
 					"Check that `@c9up/nova/provider` is listed in your reamrc.ts providers.",
 			);
 		}
-		const value = Reflect.get(_instance, prop, _instance);
-		return typeof value === "function" ? value.bind(_instance) : value;
+		const value = Reflect.get(instance, prop, instance);
+		return typeof value === "function" ? value.bind(instance) : value;
 	},
 });
 

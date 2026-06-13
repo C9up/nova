@@ -146,7 +146,8 @@ export async function configure(codemods: Codemods): Promise<void> {
 		`import { defineConfig } from '@c9up/nova'
 import env from '#start/env'
 
-// Run \`ream nova:vapid:generate\` to mint a VAPID key pair into .env.
+// Mint a VAPID key pair for .env with generateVapidKeys() from '@c9up/nova':
+//   node --input-type=module -e "import {generateVapidKeys} from '@c9up/nova'; console.log(generateVapidKeys())"
 
 export default defineConfig({
   routePrefix: '/api/nova',

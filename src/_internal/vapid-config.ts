@@ -83,13 +83,13 @@ function checkBase64UrlShape(
 function missing(field: string): NovaError {
 	return new NovaError(
 		"NOVA_VAPID_NOT_CONFIGURED",
-		`Nova VAPID ${field} is missing. Configure NOVA_VAPID_PUBLIC_KEY, NOVA_VAPID_PRIVATE_KEY, NOVA_VAPID_SUBJECT in your env (or run \`ream nova:vapid:generate\`) and pass them through \`config/nova.ts\`.`,
+		`Nova VAPID ${field} is missing. Configure NOVA_VAPID_PUBLIC_KEY, NOVA_VAPID_PRIVATE_KEY, NOVA_VAPID_SUBJECT in your env (mint a pair with \`generateVapidKeys()\` from '@c9up/nova') and pass them through \`config/nova.ts\`.`,
 	);
 }
 
 function invalidShape(field: string, expected: string): NovaError {
 	return new NovaError(
 		"NOVA_VAPID_NOT_CONFIGURED",
-		`Nova VAPID ${field} is malformed (expected ${expected}). Set NOVA_VAPID_PUBLIC_KEY, NOVA_VAPID_PRIVATE_KEY, NOVA_VAPID_SUBJECT correctly in your env or re-run \`ream nova:vapid:generate\`.`,
+		`Nova VAPID ${field} is malformed (expected ${expected}). Set NOVA_VAPID_PUBLIC_KEY, NOVA_VAPID_PRIVATE_KEY, NOVA_VAPID_SUBJECT correctly in your env (mint a pair with \`generateVapidKeys()\` from '@c9up/nova').`,
 	);
 }

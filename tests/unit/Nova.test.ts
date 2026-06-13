@@ -269,6 +269,15 @@ describe("Nova > VAPID validation", () => {
 		).not.toThrow();
 	});
 
+	// Audit 2026-06-13: the message pointed at `ream nova:vapid:generate`, a CLI
+	// command that does not exist. It must reference the real public API.
+	it("VAPID-missing error points at generateVapidKeys(), not a nonexistent CLI command", async () => {
+		const nova = new Nova(new MemorySubscriptionDriver(), undefined);
+		await expect(nova.push(SUB_A, PAYLOAD)).rejects.toThrow(
+			/generateVapidKeys/,
+		);
+	});
+
 	it("throws NOVA_VAPID_NOT_CONFIGURED when subject has wrong prefix", async () => {
 		const nova = new Nova(new MemorySubscriptionDriver(), {
 			...VALID_VAPID,

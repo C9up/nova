@@ -4,8 +4,15 @@
  * Wraps `web-push@^3.6` with: lazy VAPID validation (first-`push`, not at
  * construction), per-call `vapidDetails` (no global setVapidDetails — keeps
  * Nova instances independent), automatic subscription cleanup on RFC 8030
- * §7.3 gone responses (404/410), and a `PushResult` discriminated union
- * (no per-push throws).
+ * §7.3 gone responses (404/410), and a `PushResult` discriminated union for
+ * every web-push protocol error (a `WebPushError` carrying a numeric status).
+ *
+ * `push()` still throws on errors outside that protocol surface: setup errors
+ * (missing/invalid VAPID, invalid `ttl`/`topic` — fail-fast on misuse) and
+ * transport-layer failures (a network error, a `WebPushError` with no parsed
+ * status, a non-serialisable payload). `pushToUser()` is the fan-out layer
+ * that converts a per-subscription throw into a `PushResult`, so one bad device
+ * (or payload) can't abort delivery to the rest.
  */
 
 import webpush from "web-push";

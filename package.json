@@ -52,6 +52,7 @@
     "vitest": "^4.1.2"
   },
   "peerDependencies": {
+    "@c9up/atlas": "^0.1.0",
     "@c9up/ream": "^0.1.0"
   },
   "dependencies": {
@@ -89,6 +90,9 @@
     "access": "public"
   },
   "peerDependenciesMeta": {
+    "@c9up/atlas": {
+      "optional": true
+    },
     "@c9up/ream": {
       "optional": true
     }

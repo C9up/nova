@@ -45,6 +45,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.10",
     "@types/node": "*",
     "@types/web-push": "^3.6.4",
     "jsdom": "^29.1.1",

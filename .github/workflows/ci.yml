@@ -35,7 +35,7 @@ jobs:
         with:
           node-version: '22'
       - run: pnpm install --no-frozen-lockfile
-      - run: pnpm typecheck
+      - run: pnpm exec tsc -p tsconfig.build.json --noEmit
       - run: pnpm lint
   # nova is a pure-TS leaf: zero @c9up runtime deps, builds and tests
   # standalone (no native crate, no cross-compile matrix, no sibling

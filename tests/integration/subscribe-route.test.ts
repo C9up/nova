@@ -206,6 +206,32 @@ describe("nova > subscribe route (integration)", () => {
 		expect(await store.listByUser("user-1")).toEqual([]);
 	});
 
+	it("returns 400 for an endpoint over the 768-char storage cap (not a deep DB error)", async () => {
+		const { router, routes } = makeRouter();
+		const store = new MemorySubscriptionDriver();
+		const app = makeApp({ router, store });
+		const provider = new NovaProvider(app);
+		provider.register();
+		await provider.boot();
+
+		const handler = routes[0]?.handler;
+		if (!handler) throw new Error("handler not captured");
+		// 796-char https endpoint: valid scheme/keys but over the 768 storage
+		// column, so it must be rejected at the boundary, never on DB insert.
+		const longEndpoint = `https://fcm.googleapis.com/fcm/send/${"a".repeat(760)}`;
+		const { ctx, captured } = makeCtx("user-1", {
+			...VALID_BODY,
+			endpoint: longEndpoint,
+		});
+		await handler(ctx);
+
+		expect(captured.status).toBe(400);
+		expect(
+			(captured.body as { error: { code: string } }).error.code,
+		).toBe("NOVA_INVALID_SUBSCRIPTION");
+		expect(await store.listByUser("user-1")).toEqual([]);
+	});
+
 	it("upserts on duplicate POST for the same user (no duplicate row)", async () => {
 		const { router, routes } = makeRouter();
 		const store = new MemorySubscriptionDriver();

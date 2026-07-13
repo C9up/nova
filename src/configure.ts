@@ -54,18 +54,21 @@ self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()))
 
 self.addEventListener('push', (event) => {
-  if (!event.data) return
+  // userVisibleOnly: show a notification on EVERY push — a data-less push must
+  // still surface a generic one, or the browser revokes the subscription.
   let payload = {}
-  try {
-    const parsed = event.data.json()
-    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      payload = parsed
-    }
-  } catch {
+  if (event.data) {
     try {
-      payload = { title: event.data.text() }
+      const parsed = event.data.json()
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        payload = parsed
+      }
     } catch {
-      payload = {}
+      try {
+        payload = { title: event.data.text() }
+      } catch {
+        payload = {}
+      }
     }
   }
   const { title = 'Notification', body, icon, url, tag, data } = payload

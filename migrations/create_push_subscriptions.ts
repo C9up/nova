@@ -8,11 +8,9 @@ export default class CreatePushSubscriptions extends Migration {
 			// endpoint URL observed in the wild from FCM / Mozilla autopush / Apple
 			// push services (all < 200 chars). Do NOT raise this without re-running
 			// `assertInnodbPkBudget` in `packages/atlas/tests/unit/migration-portability.ts`.
-			// Note: Nova's runtime `SubscribeController` still accepts endpoints up
-			// to 2048 chars (MAX_ENDPOINT_LENGTH); storage rejects > 768 with a
-			// dialect-specific length error. The divergence is intentional — the
-			// runtime cap is a network-input sanity check, the storage cap is an
-			// InnoDB index constraint.
+			// Nova's runtime `SubscribeController.MAX_ENDPOINT_LENGTH` is kept in sync
+			// with this 768 cap so an over-long endpoint is rejected with a controlled
+			// 400 at the boundary, never a dialect-specific DB length error on insert.
 			t.string("endpoint", 768).primary();
 			t.string("user_id", 255).notNullable();
 			t.index("user_id");

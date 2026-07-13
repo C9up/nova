@@ -27,7 +27,11 @@ interface HttpContextLike {
 	auth?: { user?: { id?: string } };
 }
 
-const MAX_ENDPOINT_LENGTH = 2048;
+// Matches the `endpoint VARCHAR(768)` storage column (InnoDB PK index budget) so
+// an over-long endpoint is rejected with a controlled 400 at the boundary instead
+// of failing deep with a dialect-specific DB length error on insert. Real push
+// endpoints (FCM / Mozilla autopush / Apple) are all < 200 chars.
+const MAX_ENDPOINT_LENGTH = 768;
 const BASE64URL_CHARS = /^[A-Za-z0-9_-]+$/;
 const P256DH_LENGTH_RANGE: readonly [number, number] = [86, 90];
 const AUTH_LENGTH_RANGE: readonly [number, number] = [22, 26];

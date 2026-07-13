@@ -101,6 +101,16 @@ describe("configure hook — codemods writes (config/nova.ts + migration + publi
 		expect(swWrite.content).toBe(SW_TEMPLATE);
 	});
 
+	it("SW push handler shows a notification on EVERY push, incl. a data-less one (userVisibleOnly)", () => {
+		// A bare `if (!event.data) return` would skip showNotification on a
+		// data-less push and let the browser revoke the userVisibleOnly sub.
+		expect(SW_TEMPLATE).not.toMatch(/if\s*\(\s*!event\.data\s*\)\s*return/);
+		// The data parse is GUARDED (payload stays {} → generic notification),
+		// and showNotification is unconditionally reached afterwards.
+		expect(SW_TEMPLATE).toMatch(/if\s*\(\s*event\.data\s*\)\s*\{/);
+		expect(SW_TEMPLATE).toContain("self.registration.showNotification(");
+	});
+
 	it("does NOT pass force=true on the migration write (idempotency by path)", async () => {
 		const fake = makeFakeCodemods();
 		await configure(fake.codemods);

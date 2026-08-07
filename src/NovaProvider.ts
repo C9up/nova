@@ -90,8 +90,8 @@ export default class NovaProvider {
 			}
 		} else {
 			const vapidConfig = this.#config.vapid;
-			this.#app.container.singleton(NOVA_TOKEN, () => {
-				const store = this.#app.container.resolve<SubscriptionStore>(
+			this.#app.container.singleton(NOVA_TOKEN, async () => {
+				const store = await this.#app.container.resolve<SubscriptionStore>(
 					SUBSCRIPTION_STORE_TOKEN,
 				);
 				return new Nova(store, vapidConfig);
@@ -100,14 +100,14 @@ export default class NovaProvider {
 	}
 
 	async boot(): Promise<void> {
-		setPush(this.#app.container.resolve<Nova>(NOVA_TOKEN));
-		const router = this.#app.container.resolve<RouterLike>("router");
+		setPush(await this.#app.container.resolve<Nova>(NOVA_TOKEN));
+		const router = await this.#app.container.resolve<RouterLike>("router");
 		const rawPrefix = this.#config.routePrefix;
 		const trimmedPrefix =
 			typeof rawPrefix === "string" ? rawPrefix.replace(/\/+$/, "") : "";
 		const prefix = trimmedPrefix.length > 0 ? trimmedPrefix : "/api/nova";
 		const path = `${prefix}/subscribe`;
-		const store = this.#app.container.resolve<SubscriptionStore>(
+		const store = await this.#app.container.resolve<SubscriptionStore>(
 			SUBSCRIPTION_STORE_TOKEN,
 		);
 		const controller = new SubscribeController(store);

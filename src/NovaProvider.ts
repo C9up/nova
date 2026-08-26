@@ -29,7 +29,14 @@ const NOVA_TOKEN = "nova";
 
 interface ContainerLike {
 	singleton(token: string | symbol, factory: () => unknown): void;
-	resolve<T = unknown>(token: string | symbol): T;
+	/**
+	 * ASYNC, as it is in ream and in `@adonisjs/fold` — a factory, a provider
+	 * or a `resolving` hook may be async, so resolution cannot be synchronous.
+	 * Declared sync here, this interface made `NovaAppContext` incompatible with
+	 * ream's `AppContext`, and registering the provider failed to typecheck in
+	 * every app.
+	 */
+	resolve<T = unknown>(token: string | symbol): Promise<T>;
 	has?(token: string | symbol): boolean;
 }
 

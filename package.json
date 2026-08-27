@@ -1,6 +1,6 @@
 {
   "name": "@c9up/nova",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Nova \u2014 Web Push notifications for Ream (VAPID + subscription endpoint + service worker scaffolding)",
   "license": "MIT",
   "type": "module",
@@ -54,8 +54,8 @@
     "vitest": "^4.1.2"
   },
   "peerDependencies": {
-    "@c9up/atlas": "^0.2.0",
-    "@c9up/ream": "^0.1.0"
+    "@c9up/atlas": "^0.3.0",
+    "@c9up/ream": "^0.2.0"
   },
   "dependencies": {
     "web-push": "^3.6.7"

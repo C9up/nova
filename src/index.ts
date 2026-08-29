@@ -4,6 +4,7 @@ export {
 	type NovaVapidConfig,
 } from "./config.js";
 export { NovaError } from "./errors.js";
+export { FileSubscriptionStore } from "./FileSubscriptionStore.js";
 export {
 	Nova,
 	type PushFailureReason,

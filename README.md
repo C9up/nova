@@ -112,9 +112,10 @@ Subscriptions live behind a `SubscriptionStore`. Nova ships three:
 
 | Store | Keeps them | Use it when |
 | --- | --- | --- |
-| `MemorySubscriptionDriver` | until the process exits | tests, and a dev machine with no database |
+| `MemorySubscriptionDriver` | until the process exits | tests, and a dev machine with nothing set up |
 | `SqlSubscriptionStore` | in the `push_subscriptions` table | you already have a database |
 | `RedisSubscriptionStore` | in Redis, under `nova:push:*` | you already run Redis for a cache or a queue |
+| `FileSubscriptionStore` | in one JSON file | one process, and neither of the above |
 
 The provider uses the in-memory one unless the config names another — right for
 tests, wrong for production, where it forgets every subscription on restart.
@@ -162,6 +163,30 @@ subscriptions on restart. Browsers re-subscribe on their next visit, so the cost
 is a missed notification rather than a broken account — but if that is not
 acceptable, use a persistent Redis or the SQL store.
 
+### A file
+
+```ts
+// config/nova.ts
+import { defineConfig, FileSubscriptionStore } from '@c9up/nova'
+
+export default defineConfig({
+  store: new FileSubscriptionStore('storage/push_subscriptions.json'),
+})
+```
+
+Nothing to install and nothing to run. The file is written to a temporary path
+and renamed over the real one, so a crash mid-write leaves the previous file
+rather than a truncated one, and writes are serialised so a burst of subscribes
+cannot overwrite each other.
+
+**One process.** Two processes writing the same file overwrite each other —
+nothing here takes a lock the operating system enforces. Behind a cluster,
+`pm2 -i`, or several containers, use SQL or Redis.
+
+A file it cannot parse is refused rather than treated as empty: starting from
+empty would replace your subscriptions on the next subscribe, and the only
+symptom would be notifications that stop arriving.
+
 ### Your own
 
 ```ts
@@ -172,7 +197,7 @@ export interface SubscriptionStore {
 }
 ```
 
-One rule matters, and all three shipped stores follow it: `save` detaches the
+One rule matters, and all four shipped stores follow it: `save` detaches the
 endpoint from its previous owner. A push endpoint is globally unique per push
 service, so a browser reused across a logout/login pair would otherwise stay
 attached to both accounts — and the next notification for the old one would
@@ -201,7 +226,7 @@ device, `gone` cleanup) build a real `Nova` over a `MemorySubscriptionDriver` se
 
 | Import | What it is |
 | --- | --- |
-| `@c9up/nova` | `Nova`, `defineConfig`, `generateVapidKeys`, the three stores, errors |
+| `@c9up/nova` | `Nova`, `defineConfig`, `generateVapidKeys`, the four stores, errors |
 | `@c9up/nova/provider` | the provider — routes, container bindings |
 | `@c9up/nova/services/main` | the container accessor, for sending from anywhere |
 | `@c9up/nova/client` | `registerServiceWorker`, `subscribe`, `urlBase64ToUint8Array` |

@@ -171,6 +171,9 @@ export default defineConfig({
   //   import redis from '@c9up/quasar/services/main'
   //   import { RedisSubscriptionStore } from '@c9up/nova'
   //   store: new RedisSubscriptionStore(() => redis.connection()),
+  //
+  //   import { FileSubscriptionStore } from '@c9up/nova'
+  //   store: new FileSubscriptionStore('storage/push_subscriptions.json'),
 
   vapid: {
     publicKey: env.get('NOVA_VAPID_PUBLIC_KEY'),

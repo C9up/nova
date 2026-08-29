@@ -126,15 +126,19 @@ store and it is used:
 
 ```ts
 // config/nova.ts
-import db from '@c9up/atlas/services/db'
+import app from '@c9up/ream/services/app'
 import { defineConfig, SqlSubscriptionStore } from '@c9up/nova'
 
 export default defineConfig({
-  store: new SqlSubscriptionStore(db),
+  store: new SqlSubscriptionStore(() => app.container.resolve('db')),
 })
 ```
 
-Any connection answering `query`, `execute` and its `dialect` fits — nova does
+The function matters: a config file is read before the application boots, so
+the connection does not exist yet — it is resolved on the first push and kept.
+Pass the connection directly anywhere it already exists (a provider, a test).
+
+Any connection answering `execute`, `query` and its `dialect` fits — nova does
 not depend on a database package. Pass `{ table }` if you renamed the table.
 
 ### Redis
@@ -145,7 +149,7 @@ import redis from '@c9up/quasar/services/main'
 import { defineConfig, RedisSubscriptionStore } from '@c9up/nova'
 
 export default defineConfig({
-  store: new RedisSubscriptionStore(redis.connection()),
+  store: new RedisSubscriptionStore(() => redis.connection()),
 })
 ```
 

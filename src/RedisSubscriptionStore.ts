@@ -42,6 +42,15 @@ export interface SubscriptionRedisClient {
 	smembers(key: string): Promise<string[]>;
 }
 
+/**
+ * The client itself, or something that answers with one. A config file is
+ * loaded before the application boots, so the connection does not exist yet
+ * there — a function defers the lookup to the first push.
+ */
+export type SubscriptionRedisResolver =
+	| SubscriptionRedisClient
+	| (() => SubscriptionRedisClient | Promise<SubscriptionRedisClient>);
+
 export interface RedisSubscriptionStoreOptions {
 	/**
 	 * Prefix every key this store owns. Default `"nova:push"`. Change it to run
@@ -59,11 +68,12 @@ interface StoredSubscription {
 }
 
 export class RedisSubscriptionStore implements SubscriptionStore {
-	readonly #redis: SubscriptionRedisClient;
+	readonly #source: SubscriptionRedisResolver;
+	#resolved: SubscriptionRedisClient | undefined;
 	readonly #prefix: string;
 
 	constructor(
-		redis: SubscriptionRedisClient,
+		redis: SubscriptionRedisResolver,
 		options: RedisSubscriptionStoreOptions = {},
 	) {
 		const prefix = options.prefix ?? "nova:push";
@@ -73,8 +83,16 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 				`Invalid key prefix "${prefix}" — a Redis key cannot contain a space.`,
 			);
 		}
-		this.#redis = redis;
+		this.#source = redis;
 		this.#prefix = prefix;
+	}
+
+	/** The client, resolved once and kept. */
+	async #redis(): Promise<SubscriptionRedisClient> {
+		if (this.#resolved) return this.#resolved;
+		this.#resolved =
+			typeof this.#source === "function" ? await this.#source() : this.#source;
+		return this.#resolved;
 	}
 
 	/** The subscription itself, keyed by the endpoint that identifies it. */
@@ -100,7 +118,7 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 		const key = this.#subscriptionKey(subscription.endpoint);
 		const previous = await this.#read(key);
 		if (previous && previous.userId !== userId) {
-			await this.#redis.srem(
+			await (await this.#redis()).srem(
 				this.#userKey(previous.userId),
 				subscription.endpoint,
 			);
@@ -112,8 +130,11 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 			p256dh: subscription.keys.p256dh,
 			auth: subscription.keys.auth,
 		};
-		await this.#redis.set(key, JSON.stringify(stored));
-		await this.#redis.sadd(this.#userKey(userId), subscription.endpoint);
+		await (await this.#redis()).set(key, JSON.stringify(stored));
+		await (await this.#redis()).sadd(
+			this.#userKey(userId),
+			subscription.endpoint,
+		);
 	}
 
 	/**
@@ -124,7 +145,9 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 	 * leaves a dangling member, and nothing else would ever clean it up.
 	 */
 	async listByUser(userId: string): Promise<PushSubscription[]> {
-		const endpoints = await this.#redis.smembers(this.#userKey(userId));
+		const endpoints = await (await this.#redis()).smembers(
+			this.#userKey(userId),
+		);
 		const found: PushSubscription[] = [];
 		const dangling: string[] = [];
 
@@ -142,7 +165,7 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 		}
 
 		if (dangling.length > 0) {
-			await this.#redis.srem(this.#userKey(userId), ...dangling);
+			await (await this.#redis()).srem(this.#userKey(userId), ...dangling);
 		}
 		return found;
 	}
@@ -152,9 +175,9 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 		const key = this.#subscriptionKey(endpoint);
 		const stored = await this.#read(key);
 		if (stored) {
-			await this.#redis.srem(this.#userKey(stored.userId), endpoint);
+			await (await this.#redis()).srem(this.#userKey(stored.userId), endpoint);
 		}
-		await this.#redis.del(key);
+		await (await this.#redis()).del(key);
 	}
 
 	/**
@@ -165,7 +188,7 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 	 * and the browser re-subscribes on its next visit.
 	 */
 	async #read(key: string): Promise<StoredSubscription | undefined> {
-		const raw = await this.#redis.get(key);
+		const raw = await (await this.#redis()).get(key);
 		if (raw === null) return undefined;
 		try {
 			const parsed: unknown = JSON.parse(raw);

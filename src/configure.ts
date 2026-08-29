@@ -164,13 +164,13 @@ export default defineConfig({
   // are lost on restart. The migration written alongside this file creates the
   // table the SQL store reads; Redis is the other option.
   //
-  //   import db from '@c9up/atlas/services/db'
+  //   import app from '@c9up/ream/services/app'
   //   import { SqlSubscriptionStore } from '@c9up/nova'
-  //   store: new SqlSubscriptionStore(db),
+  //   store: new SqlSubscriptionStore(() => app.container.resolve('db')),
   //
   //   import redis from '@c9up/quasar/services/main'
   //   import { RedisSubscriptionStore } from '@c9up/nova'
-  //   store: new RedisSubscriptionStore(redis.connection()),
+  //   store: new RedisSubscriptionStore(() => redis.connection()),
 
   vapid: {
     publicKey: env.get('NOVA_VAPID_PUBLIC_KEY'),

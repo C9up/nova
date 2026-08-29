@@ -20,11 +20,13 @@ export {
 	RedisSubscriptionStore,
 	type RedisSubscriptionStoreOptions,
 	type SubscriptionRedisClient,
+	type SubscriptionRedisResolver,
 } from "./RedisSubscriptionStore.js";
 export {
 	SqlSubscriptionStore,
 	type SqlSubscriptionStoreOptions,
 	type SubscriptionDatabase,
+	type SubscriptionDatabaseResolver,
 } from "./SqlSubscriptionStore.js";
 export { SubscribeController } from "./SubscribeController.js";
 export {

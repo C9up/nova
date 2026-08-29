@@ -169,3 +169,63 @@ describe("nova > SqlSubscriptionStore", () => {
 		);
 	});
 });
+
+/**
+ * The shape an Atlas connection presents.
+ *
+ * Nova does not depend on Atlas, so nothing here imports it — this pins the
+ * contract instead: `execute` answering `{ rowsAffected, lastInsertId }`,
+ * `query` answering rows, and `dialect` spelled the way Atlas spells it
+ * (`"sqlite" | "postgres" | "mysql"`). If Atlas ever renamed one of those, the
+ * store would silently pick `?` placeholders on Postgres and bind nothing.
+ */
+describe("nova > SqlSubscriptionStore with an Atlas-shaped connection", () => {
+	interface AtlasShapedConnection {
+		readonly dialect: "sqlite" | "postgres" | "mysql";
+		execute(
+			sql: string,
+			params?: unknown[],
+		): Promise<{ rowsAffected: number; lastInsertId?: number }>;
+		query<T = Record<string, unknown>>(
+			sql: string,
+			params?: unknown[],
+		): Promise<T[]>;
+	}
+
+	function atlasShaped(): AtlasShapedConnection & { close(): void } {
+		const inner = sqliteConnection();
+		return {
+			dialect: "sqlite",
+			async execute(sql, params) {
+				const { rowsAffected } = await inner.execute(sql, params);
+				return { rowsAffected, lastInsertId: 0 };
+			},
+			query: inner.query.bind(inner),
+			close: inner.close,
+		};
+	}
+
+	it("accepts one directly", async () => {
+		const connection = atlasShaped();
+		const store = new SqlSubscriptionStore(connection);
+
+		await store.save("user-A", subscription("https://push.example/atlas"));
+		expect(await store.listByUser("user-A")).toHaveLength(1);
+	});
+
+	it("accepts a resolver, for a config loaded before the app boots", async () => {
+		const connection = atlasShaped();
+		let resolvedTimes = 0;
+		const store = new SqlSubscriptionStore(async () => {
+			resolvedTimes += 1;
+			return connection;
+		});
+
+		await store.save("user-A", subscription("https://push.example/lazy"));
+		await store.listByUser("user-A");
+
+		// Resolved on first use, then kept: a config file cannot await a
+		// connection that does not exist yet.
+		expect(resolvedTimes).toBe(1);
+	});
+});

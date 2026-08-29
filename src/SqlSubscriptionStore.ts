@@ -39,6 +39,18 @@ export interface SubscriptionDatabase {
 	): Promise<T[]>;
 }
 
+/**
+ * How the store gets its connection: the connection itself, or something that
+ * answers with one.
+ *
+ * The resolver form is what a config file needs. `config/nova.ts` is loaded
+ * before the application boots, so the connection does not exist yet and cannot
+ * be awaited there — a function defers the lookup to the first push.
+ */
+export type SubscriptionDatabaseResolver =
+	| SubscriptionDatabase
+	| (() => SubscriptionDatabase | Promise<SubscriptionDatabase>);
+
 export interface SqlSubscriptionStoreOptions {
 	/** Table the migration created. Default `"push_subscriptions"`. */
 	table?: string;
@@ -57,11 +69,12 @@ interface SubscriptionRow {
 const SAFE_TABLE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export class SqlSubscriptionStore implements SubscriptionStore {
-	readonly #db: SubscriptionDatabase;
+	readonly #source: SubscriptionDatabaseResolver;
+	#resolved: SubscriptionDatabase | undefined;
 	readonly #table: string;
 
 	constructor(
-		db: SubscriptionDatabase,
+		db: SubscriptionDatabaseResolver,
 		options: SqlSubscriptionStoreOptions = {},
 	) {
 		const table = options.table ?? "push_subscriptions";
@@ -74,16 +87,24 @@ export class SqlSubscriptionStore implements SubscriptionStore {
 				},
 			);
 		}
-		this.#db = db;
+		this.#source = db;
 		this.#table = table;
+	}
+
+	/** The connection, resolved once and kept. */
+	async #db(): Promise<SubscriptionDatabase> {
+		if (this.#resolved) return this.#resolved;
+		this.#resolved =
+			typeof this.#source === "function" ? await this.#source() : this.#source;
+		return this.#resolved;
 	}
 
 	/**
 	 * `$1`-style placeholders on Postgres, `?` elsewhere. The SQL goes to the
 	 * driver verbatim, so the shape has to match the dialect.
 	 */
-	#placeholder(index: number): string {
-		return this.#db.dialect === "postgres" ? `$${index}` : "?";
+	#placeholder(db: SubscriptionDatabase, index: number): string {
+		return db.dialect === "postgres" ? `$${index}` : "?";
 	}
 
 	/**
@@ -101,8 +122,11 @@ export class SqlSubscriptionStore implements SubscriptionStore {
 	 */
 	async save(userId: string, subscription: PushSubscription): Promise<void> {
 		await this.delete(subscription.endpoint);
-		const values = [1, 2, 3, 4, 5].map((i) => this.#placeholder(i)).join(", ");
-		await this.#db.execute(
+		const db = await this.#db();
+		const values = [1, 2, 3, 4, 5]
+			.map((i) => this.#placeholder(db, i))
+			.join(", ");
+		await db.execute(
 			`INSERT INTO ${this.#table} (endpoint, user_id, p256dh, auth, expiration_time, created_at, updated_at) ` +
 				`VALUES (${values}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
 			[
@@ -117,9 +141,10 @@ export class SqlSubscriptionStore implements SubscriptionStore {
 
 	/** Every subscription `userId` has registered, oldest first. */
 	async listByUser(userId: string): Promise<PushSubscription[]> {
-		const rows = await this.#db.query<SubscriptionRow>(
+		const db = await this.#db();
+		const rows = await db.query<SubscriptionRow>(
 			`SELECT endpoint, p256dh, auth, expiration_time FROM ${this.#table} ` +
-				`WHERE user_id = ${this.#placeholder(1)} ORDER BY created_at`,
+				`WHERE user_id = ${this.#placeholder(db, 1)} ORDER BY created_at`,
 			[userId],
 		);
 		return rows.map((row) => ({
@@ -133,8 +158,9 @@ export class SqlSubscriptionStore implements SubscriptionStore {
 
 	/** Forget one subscription, whoever owns it. */
 	async delete(endpoint: string): Promise<void> {
-		await this.#db.execute(
-			`DELETE FROM ${this.#table} WHERE endpoint = ${this.#placeholder(1)}`,
+		const db = await this.#db();
+		await db.execute(
+			`DELETE FROM ${this.#table} WHERE endpoint = ${this.#placeholder(db, 1)}`,
 			[endpoint],
 		);
 	}

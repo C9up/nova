@@ -1,6 +1,6 @@
 {
   "name": "@c9up/nova",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "Nova \u2014 Web Push notifications for Ream (VAPID + subscription endpoint + service worker scaffolding)",
   "license": "MIT",
   "type": "module",
@@ -31,6 +31,10 @@
     "./configure": {
       "types": "./src/configure.ts",
       "import": "./src/configure.ts"
+    },
+    "./commands": {
+      "types": "./src/commands/index.ts",
+      "import": "./src/commands/index.ts"
     },
     "./testing": {
       "types": "./src/testing/FakeNova.ts",
@@ -83,6 +87,10 @@
       "./configure": {
         "types": "./dist/configure.d.ts",
         "import": "./dist/configure.js"
+      },
+      "./commands": {
+        "types": "./dist/commands/index.d.ts",
+        "import": "./dist/commands/index.js"
       },
       "./testing": {
         "types": "./dist/testing/FakeNova.d.ts",

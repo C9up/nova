@@ -38,13 +38,18 @@ function makeFakeCodemods() {
 	const providers: string[] = [];
 	const envVars: Array<Record<string, string>> = [];
 	const writes: RecordedWrite[] = [];
+	const commands: string[] = [];
 	return {
 		providers,
 		envVars,
 		writes,
+		commands,
 		codemods: {
 			async addProvider(importPath: string) {
 				providers.push(importPath);
+			},
+			async registerCommand(importPath: string) {
+				commands.push(importPath);
 			},
 			async addEnvVars(vars: Record<string, string>) {
 				envVars.push(vars);
@@ -71,6 +76,9 @@ describe("configure hook — codemods writes (config/nova.ts + migration + publi
 		await configure(fake.codemods);
 
 		expect(fake.providers).toEqual(["@c9up/nova/provider"]);
+		// The command travels with the package, not with the CLI binary — so
+		// installing nova is all a user does to get `ream nova:vapid:generate`.
+		expect(fake.commands).toEqual(["@c9up/nova/commands"]);
 		expect(fake.envVars).toHaveLength(1);
 		expect(fake.envVars[0]).toMatchObject({
 			NOVA_VAPID_PUBLIC_KEY: "",

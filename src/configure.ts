@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 interface Codemods {
 	addProvider(importPath: string): Promise<void>;
+	registerCommand(importPath: string): Promise<void>;
 	addEnvVars(vars: Record<string, string>): Promise<void>;
 	writeFile(
 		filePath: string,
@@ -139,6 +140,9 @@ export async function configure(codemods: Codemods): Promise<void> {
 	const migrationContent = await readMigrationTemplate();
 
 	await codemods.addProvider("@c9up/nova/provider");
+	// The command belongs to the package, so installing the package is all a
+	// user does — nothing is added to the `ream` binary for it.
+	await codemods.registerCommand("@c9up/nova/commands");
 	await codemods.addEnvVars({
 		NOVA_VAPID_PUBLIC_KEY: "",
 		NOVA_VAPID_PRIVATE_KEY: "",

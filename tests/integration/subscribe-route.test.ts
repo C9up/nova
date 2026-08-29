@@ -226,9 +226,9 @@ describe("nova > subscribe route (integration)", () => {
 		await handler(ctx);
 
 		expect(captured.status).toBe(400);
-		expect(
-			(captured.body as { error: { code: string } }).error.code,
-		).toBe("NOVA_INVALID_SUBSCRIPTION");
+		expect((captured.body as { error: { code: string } }).error.code).toBe(
+			"NOVA_INVALID_SUBSCRIPTION",
+		);
 		expect(await store.listByUser("user-1")).toEqual([]);
 	});
 

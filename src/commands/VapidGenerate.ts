@@ -9,22 +9,28 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { BaseCommand, flags } from "@c9up/ream";
 import { generateVapidKeys } from "../vapid.js";
+import { flag, type NovaCommandClass } from "./contract.js";
 
 const PUBLIC_KEY = "NOVA_VAPID_PUBLIC_KEY";
 const PRIVATE_KEY = "NOVA_VAPID_PRIVATE_KEY";
 
-export default class VapidGenerate extends BaseCommand {
-	static override commandName = "nova:vapid:generate";
-	static override description =
+class VapidGenerate {
+	static commandName = "nova:vapid:generate";
+	static description =
 		"Generate a VAPID key pair for Web Push (writes NOVA_VAPID_* into .env)";
 
-	@flags.boolean({
-		description:
-			"Overwrite an existing key pair — every current subscription stops working",
-	})
-	declare force: boolean;
+	// Writes one file; nothing here needs a booted application.
+	static options = { startApp: false };
+
+	static flags = [
+		flag("force", "boolean", {
+			description:
+				"Overwrite an existing key pair — every current subscription stops working",
+		}),
+	];
+
+	force = false;
 
 	async run(): Promise<void> {
 		const envPath = resolve(process.cwd(), ".env");
@@ -37,11 +43,11 @@ export default class VapidGenerate extends BaseCommand {
 		}
 
 		if (!this.force && readEnvValue(existing, PRIVATE_KEY)) {
-			this.logger.error(
+			process.stderr.write(
 				`${PRIVATE_KEY} is already set in .env. Re-run with --force to overwrite — ` +
-					"every subscription signed with the current key stops working.",
+					"every subscription signed with the current key stops working.\n",
 			);
-			this.exitCode = 1;
+			process.exitCode = 1;
 			return;
 		}
 
@@ -50,10 +56,19 @@ export default class VapidGenerate extends BaseCommand {
 		updated = upsertEnvVar(updated, PRIVATE_KEY, pair.privateKey);
 		writeFileSync(envPath, updated);
 
-		this.logger.success(`Wrote ${PUBLIC_KEY} and ${PRIVATE_KEY} to .env`);
-		this.logger.info(`Public key: ${pair.publicKey}`);
+		process.stdout.write(
+			`  create  .env — ${PUBLIC_KEY}, ${PRIVATE_KEY}\n` +
+				`  public  ${pair.publicKey}\n`,
+		);
 	}
 }
+
+/**
+ * `satisfies` rather than `implements`: the kernel dispatches structurally, so
+ * what has to hold is the STATIC side — the name, the description, the flag
+ * metadata — and this is what checks it at compile time.
+ */
+export default VapidGenerate satisfies NovaCommandClass;
 
 /** The value of `name` in a dotenv body, or `undefined`. */
 function readEnvValue(body: string, name: string): string | undefined {

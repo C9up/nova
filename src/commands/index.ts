@@ -10,6 +10,8 @@
  * does not own to the application's console kernel.
  */
 
+import type { NovaCommandClass } from "./contract.js";
+
 interface CommandMetaData {
 	commandName: string;
 	description: string;
@@ -27,7 +29,9 @@ export async function getMetaData(): Promise<CommandMetaData[]> {
 	return COMMANDS;
 }
 
-export async function getCommand(metadata: CommandMetaData): Promise<unknown> {
+export async function getCommand(
+	metadata: CommandMetaData,
+): Promise<NovaCommandClass | null> {
 	if (metadata.commandName === "nova:vapid:generate") {
 		return (await import("./VapidGenerate.js")).default;
 	}

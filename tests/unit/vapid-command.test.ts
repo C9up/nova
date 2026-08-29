@@ -23,46 +23,65 @@ describe("nova:vapid:generate", () => {
 		process.chdir(previous);
 	});
 
+	/**
+	 * The command writes to the process streams rather than to an injected
+	 * logger: `@c9up/ream` is an optional peer, so nothing here may assume the
+	 * framework is installed. Capture the streams, and restore them after.
+	 */
 	function makeCommand(force = false) {
 		const logged: string[] = [];
 		const command = new VapidGenerate();
-		Object.assign(command, {
-			force,
-			logger: {
-				success: (m: string) => logged.push(`success:${m}`),
-				info: (m: string) => logged.push(`info:${m}`),
-				error: (m: string) => logged.push(`error:${m}`),
-			},
-		});
-		return { command, logged };
+		command.force = force;
+
+		const stdout = process.stdout.write.bind(process.stdout);
+		const stderr = process.stderr.write.bind(process.stderr);
+		const capture =
+			(prefix: string) =>
+			(chunk: string | Uint8Array): boolean => {
+				logged.push(`${prefix}:${String(chunk)}`);
+				return true;
+			};
+		process.stdout.write = capture("out");
+		process.stderr.write = capture("err");
+		const restore = () => {
+			process.stdout.write = stdout;
+			process.stderr.write = stderr;
+		};
+
+		return { command, logged, restore };
 	}
 
 	it("writes both keys into a .env that does not exist yet", async () => {
-		const { command, logged } = makeCommand();
+		const { command, logged, restore } = makeCommand();
 		await command.run();
+		restore();
 
 		const env = await readFile(join(cwd, ".env"), "utf8");
 		expect(env).toMatch(/^NOVA_VAPID_PUBLIC_KEY=.+$/m);
 		expect(env).toMatch(/^NOVA_VAPID_PRIVATE_KEY=.+$/m);
-		expect(logged.some((l) => l.startsWith("success:"))).toBe(true);
+		expect(logged.join("\n")).toContain("NOVA_VAPID_PUBLIC_KEY");
 	});
 
 	it("refuses to overwrite an existing private key, and says why", async () => {
 		await writeFile(join(cwd, ".env"), "NOVA_VAPID_PRIVATE_KEY=already\n");
-		const { command, logged } = makeCommand();
+		const { command, logged, restore } = makeCommand();
+		const previousExit = process.exitCode;
 		await command.run();
+		restore();
 
 		// Losing the private key invalidates every live subscription, so the
 		// refusal has to say that rather than just "already set".
-		expect(command.exitCode).toBe(1);
+		expect(process.exitCode).toBe(1);
+		process.exitCode = previousExit;
 		expect(logged.join("\n")).toMatch(/stops working/);
 		expect(await readFile(join(cwd, ".env"), "utf8")).toContain("already");
 	});
 
 	it("overwrites with --force, replacing the line rather than adding a second", async () => {
 		await writeFile(join(cwd, ".env"), "OTHER=x\nNOVA_VAPID_PRIVATE_KEY=old\n");
-		const { command } = makeCommand(true);
+		const { command, restore } = makeCommand(true);
 		await command.run();
+		restore();
 
 		const env = await readFile(join(cwd, ".env"), "utf8");
 		expect(env).toContain("OTHER=x");

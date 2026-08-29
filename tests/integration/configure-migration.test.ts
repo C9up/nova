@@ -12,11 +12,10 @@
  * the inlined `SW_TEMPLATE`.
  */
 
-import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, rename } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { configure, SW_TEMPLATE } from "../../src/configure.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));

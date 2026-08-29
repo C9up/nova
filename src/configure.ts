@@ -159,6 +159,19 @@ import env from '#start/env'
 export default defineConfig({
   routePrefix: '/api/nova',
   guard: 'jwt',
+
+  // Subscriptions are kept in memory until you say otherwise — which means they
+  // are lost on restart. The migration written alongside this file creates the
+  // table the SQL store reads; Redis is the other option.
+  //
+  //   import db from '@c9up/atlas/services/db'
+  //   import { SqlSubscriptionStore } from '@c9up/nova'
+  //   store: new SqlSubscriptionStore(db),
+  //
+  //   import redis from '@c9up/quasar/services/main'
+  //   import { RedisSubscriptionStore } from '@c9up/nova'
+  //   store: new RedisSubscriptionStore(redis.connection()),
+
   vapid: {
     publicKey: env.get('NOVA_VAPID_PUBLIC_KEY'),
     privateKey: env.get('NOVA_VAPID_PRIVATE_KEY'),

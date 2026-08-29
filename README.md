@@ -108,19 +108,57 @@ the window on click — edit it, it is yours.
 
 ## Storage
 
-Subscriptions live behind a `SubscriptionStore`. Nova ships one
-implementation, `MemorySubscriptionDriver`, and the provider uses it by default. That is right for
-tests and wrong for production: it forgets every subscription on restart.
+Subscriptions live behind a `SubscriptionStore`. Nova ships three:
 
-`configure` writes a migration creating the durable table, so the schema is there for a driver of
-your own:
+| Store | Keeps them | Use it when |
+| --- | --- | --- |
+| `MemorySubscriptionDriver` | until the process exits | tests, and a dev machine with no database |
+| `SqlSubscriptionStore` | in the `push_subscriptions` table | you already have a database |
+| `RedisSubscriptionStore` | in Redis, under `nova:push:*` | you already run Redis for a cache or a queue |
+
+The provider uses the in-memory one unless the config names another — right for
+tests, wrong for production, where it forgets every subscription on restart.
+
+### SQL
+
+`configure` writes the migration that creates the table; point the config at the
+store and it is used:
 
 ```ts
 // config/nova.ts
+import db from '@c9up/atlas/services/db'
+import { defineConfig, SqlSubscriptionStore } from '@c9up/nova'
+
 export default defineConfig({
-  store: new MyAtlasSubscriptionStore(db),   // anything implementing SubscriptionStore
+  store: new SqlSubscriptionStore(db),
 })
 ```
+
+Any connection answering `query`, `execute` and its `dialect` fits — nova does
+not depend on a database package. Pass `{ table }` if you renamed the table.
+
+### Redis
+
+```ts
+// config/nova.ts
+import redis from '@c9up/quasar/services/main'
+import { defineConfig, RedisSubscriptionStore } from '@c9up/nova'
+
+export default defineConfig({
+  store: new RedisSubscriptionStore(redis.connection()),
+})
+```
+
+The client contract is the minimal one ioredis, node-redis and quasar all
+satisfy. Keys are prefixed `nova:push` — pass `{ prefix }` to run two
+applications against one database.
+
+Durability here is the server's: a Redis with no persistence loses
+subscriptions on restart. Browsers re-subscribe on their next visit, so the cost
+is a missed notification rather than a broken account — but if that is not
+acceptable, use a persistent Redis or the SQL store.
+
+### Your own
 
 ```ts
 export interface SubscriptionStore {
@@ -129,6 +167,12 @@ export interface SubscriptionStore {
   delete(endpoint: string): Promise<void>
 }
 ```
+
+One rule matters, and all three shipped stores follow it: `save` detaches the
+endpoint from its previous owner. A push endpoint is globally unique per push
+service, so a browser reused across a logout/login pair would otherwise stay
+attached to both accounts — and the next notification for the old one would
+land on the new user's screen.
 
 ## Testing
 
@@ -153,7 +197,7 @@ device, `gone` cleanup) build a real `Nova` over a `MemorySubscriptionDriver` se
 
 | Import | What it is |
 | --- | --- |
-| `@c9up/nova` | `Nova`, `defineConfig`, `generateVapidKeys`, `SubscriptionStore`, errors |
+| `@c9up/nova` | `Nova`, `defineConfig`, `generateVapidKeys`, the three stores, errors |
 | `@c9up/nova/provider` | the provider — routes, container bindings |
 | `@c9up/nova/services/main` | the container accessor, for sending from anywhere |
 | `@c9up/nova/client` | `registerServiceWorker`, `subscribe`, `urlBase64ToUint8Array` |

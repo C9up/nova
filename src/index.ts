@@ -16,6 +16,16 @@ export {
 	default as NovaProvider,
 	type NovaAppContext,
 } from "./NovaProvider.js";
+export {
+	RedisSubscriptionStore,
+	type RedisSubscriptionStoreOptions,
+	type SubscriptionRedisClient,
+} from "./RedisSubscriptionStore.js";
+export {
+	SqlSubscriptionStore,
+	type SqlSubscriptionStoreOptions,
+	type SubscriptionDatabase,
+} from "./SqlSubscriptionStore.js";
 export { SubscribeController } from "./SubscribeController.js";
 export {
 	MemorySubscriptionDriver,

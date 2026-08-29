@@ -16,6 +16,7 @@
  */
 
 import type { NovaConfig } from "./config.js";
+import { NovaError } from "./errors.js";
 import { Nova } from "./Nova.js";
 import { SubscribeController } from "./SubscribeController.js";
 import {
@@ -68,7 +69,7 @@ export default class NovaProvider {
 
 	register(): void {
 		this.#config = this.#app.config.get<NovaConfig>("nova") ?? {};
-		const explicit = this.#config.store;
+		const explicit = this.#resolveConfiguredStore();
 		const alreadyRegistered =
 			this.#app.container.has?.(SUBSCRIPTION_STORE_TOKEN) ?? false;
 
@@ -79,7 +80,7 @@ export default class NovaProvider {
 		if (alreadyRegistered) {
 			if (explicit) {
 				console.warn(
-					"[nova] config.nova.store is set but the container already has a SubscriptionStore binding — config value ignored. Remove one source to silence this warning.",
+					"[nova] a store is configured but the container already has a SubscriptionStore binding — the config is ignored. Remove one source to silence this warning.",
 				);
 			}
 		} else {
@@ -104,6 +105,45 @@ export default class NovaProvider {
 				return new Nova(store, vapidConfig);
 			});
 		}
+	}
+
+	/**
+	 * The store the config asks for.
+	 *
+	 * `default` + `stores` first — the multi-store form the other packages use,
+	 * and the one an environment variable can steer. A `store` instance is the
+	 * single-store form kept for configs written against it. Naming a store that
+	 * does not exist throws rather than falling back: an application that meant
+	 * to persist subscriptions and silently got the in-memory driver would only
+	 * find out when a restart lost them all.
+	 */
+	#resolveConfiguredStore(): SubscriptionStore | undefined {
+		const { default: name, stores, store } = this.#config;
+		if (stores && name !== undefined) {
+			const selected = stores[name];
+			if (!selected) {
+				const known = Object.keys(stores);
+				throw new NovaError(
+					"E_NOVA_UNKNOWN_STORE",
+					`config.nova names the store '${name}', which is not in \`stores\`.`,
+					{
+						hint:
+							known.length > 0
+								? `Declared: ${known.join(", ")}.`
+								: "`stores` is empty — declare one with stores.memory(), stores.file(), stores.sql() or stores.redis().",
+					},
+				);
+			}
+			return selected();
+		}
+		if (stores && name === undefined && store === undefined) {
+			throw new NovaError(
+				"E_NOVA_UNKNOWN_STORE",
+				"config.nova declares `stores` but no `default` naming which one to use.",
+				{ hint: `Set default to one of: ${Object.keys(stores).join(", ")}.` },
+			);
+		}
+		return store;
 	}
 
 	async boot(): Promise<void> {

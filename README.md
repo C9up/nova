@@ -108,70 +108,72 @@ the window on click — edit it, it is yours.
 
 ## Storage
 
-Subscriptions live behind a `SubscriptionStore`. Nova ships three:
-
-| Store | Keeps them | Use it when |
-| --- | --- | --- |
-| `MemorySubscriptionDriver` | until the process exits | tests, and a dev machine with nothing set up |
-| `SqlSubscriptionStore` | in the `push_subscriptions` table | you already have a database |
-| `RedisSubscriptionStore` | in Redis, under `nova:push:*` | you already run Redis for a cache or a queue |
-| `FileSubscriptionStore` | in one JSON file | one process, and neither of the above |
-
-The provider uses the in-memory one unless the config names another — right for
-tests, wrong for production, where it forgets every subscription on restart.
-
-### SQL
-
-`configure` writes the migration that creates the table; point the config at the
-store and it is used:
+Subscriptions live behind a `SubscriptionStore`. Which one an application uses
+is named in the config, the way the other packages name a pluggable backend —
+so the environment picks it, and no file changes between deployments:
 
 ```ts
 // config/nova.ts
-import app from '@c9up/ream/services/app'
-import { defineConfig, SqlSubscriptionStore } from '@c9up/nova'
+import { defineConfig, stores } from '@c9up/nova'
+import env from '#start/env'
 
 export default defineConfig({
-  store: new SqlSubscriptionStore(() => app.container.resolve('db')),
+  default: env.get('NOVA_STORE'),
+  stores: {
+    memory: stores.memory(),
+    file:   stores.file({ path: 'storage/push_subscriptions.json' }),
+    sql:    stores.sql({ connection: () => app.container.resolve('db') }),
+    redis:  stores.redis({ connection: 'main' }),
+  },
 })
 ```
 
-The function matters: a config file is read before the application boots, so
-the connection does not exist yet — it is resolved on the first push and kept.
-Pass the connection directly anywhere it already exists (a provider, a test).
+Factories are lazy: only the store actually selected is built, so naming a Redis
+store in a config that runs on the file store opens no connection. A `default`
+that names nothing throws — falling back to memory would look like it worked
+until a restart lost every subscription.
+
+| Store | Keeps them | Use it when |
+| --- | --- | --- |
+| `stores.memory()` | until the process exits | tests, and a dev machine with nothing set up |
+| `stores.sql({ connection })` | in the `push_subscriptions` table | you already have a database |
+| `stores.redis({ connection })` | in Redis, under `nova:push:*` | you already run Redis for a cache or a queue |
+| `stores.file({ path })` | in one JSON file | one process, and neither of the above |
+
+### SQL
+
+`configure` writes the migration that creates the table. `connection` takes the
+connection, or a function answering one — which is what a config file needs,
+since it is read before the application boots:
+
+```ts
+sql: stores.sql({ connection: () => app.container.resolve('db') })
+```
 
 Any connection answering `execute`, `query` and its `dialect` fits — nova does
-not depend on a database package. Pass `{ table }` if you renamed the table.
+not depend on a database package. Pass `table` if you renamed the table.
 
 ### Redis
 
 ```ts
-// config/nova.ts
-import redis from '@c9up/quasar/services/main'
-import { defineConfig, RedisSubscriptionStore } from '@c9up/nova'
-
-export default defineConfig({
-  store: new RedisSubscriptionStore(() => redis.connection()),
-})
+redis: stores.redis({ connection: 'main' })
 ```
 
-The client contract is the minimal one ioredis, node-redis and quasar all
-satisfy. Keys are prefixed `nova:push` — pass `{ prefix }` to run two
-applications against one database.
+A `@c9up/quasar` connection name, resolved when the store is first used — nova
+never imports quasar, which stays optional, and says so plainly if it is absent.
+Pass a client (or a function answering one) instead to use any ioredis- or
+node-redis-shaped client. Keys are prefixed `nova:push`; pass `prefix` to run
+two applications against one database.
 
-Durability here is the server's: a Redis with no persistence loses
-subscriptions on restart. Browsers re-subscribe on their next visit, so the cost
-is a missed notification rather than a broken account — but if that is not
-acceptable, use a persistent Redis or the SQL store.
+Durability is the server's: a Redis with no persistence loses subscriptions on
+restart. Browsers re-subscribe on their next visit, so the cost is a missed
+notification rather than a broken account — but if that is not acceptable, use a
+persistent Redis or the SQL store.
 
 ### A file
 
 ```ts
-// config/nova.ts
-import { defineConfig, FileSubscriptionStore } from '@c9up/nova'
-
-export default defineConfig({
-  store: new FileSubscriptionStore('storage/push_subscriptions.json'),
-})
+file: stores.file({ path: 'storage/push_subscriptions.json' })
 ```
 
 Nothing to install and nothing to run. The file is written to a temporary path
@@ -196,6 +198,9 @@ export interface SubscriptionStore {
   delete(endpoint: string): Promise<void>
 }
 ```
+
+Wrap it in a factory and it is a store like any other:
+`mine: () => new MySubscriptionStore()`.
 
 One rule matters, and all four shipped stores follow it: `save` detaches the
 endpoint from its previous owner. A push endpoint is globally unique per push
@@ -226,7 +231,7 @@ device, `gone` cleanup) build a real `Nova` over a `MemorySubscriptionDriver` se
 
 | Import | What it is |
 | --- | --- |
-| `@c9up/nova` | `Nova`, `defineConfig`, `generateVapidKeys`, the four stores, errors |
+| `@c9up/nova` | `Nova`, `defineConfig`, `stores`, `generateVapidKeys`, the store classes, errors |
 | `@c9up/nova/provider` | the provider — routes, container bindings |
 | `@c9up/nova/services/main` | the container accessor, for sending from anywhere |
 | `@c9up/nova/client` | `registerServiceWorker`, `subscribe`, `urlBase64ToUint8Array` |

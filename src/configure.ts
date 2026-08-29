@@ -144,13 +144,14 @@ export async function configure(codemods: Codemods): Promise<void> {
 	// user does — nothing is added to the `ream` binary for it.
 	await codemods.registerCommand("@c9up/nova/commands");
 	await codemods.addEnvVars({
+		NOVA_STORE: "memory",
 		NOVA_VAPID_PUBLIC_KEY: "",
 		NOVA_VAPID_PRIVATE_KEY: "",
 		NOVA_VAPID_SUBJECT: "mailto:noreply@localhost",
 	});
 	await codemods.writeFile(
 		"config/nova.ts",
-		`import { defineConfig } from '@c9up/nova'
+		`import { defineConfig, stores } from '@c9up/nova'
 import env from '#start/env'
 
 // Mint a VAPID key pair for .env with generateVapidKeys() from '@c9up/nova':
@@ -160,20 +161,19 @@ export default defineConfig({
   routePrefix: '/api/nova',
   guard: 'jwt',
 
-  // Subscriptions are kept in memory until you say otherwise — which means they
-  // are lost on restart. The migration written alongside this file creates the
-  // table the SQL store reads; Redis is the other option.
-  //
-  //   import app from '@c9up/ream/services/app'
-  //   import { SqlSubscriptionStore } from '@c9up/nova'
-  //   store: new SqlSubscriptionStore(() => app.container.resolve('db')),
-  //
-  //   import redis from '@c9up/quasar/services/main'
-  //   import { RedisSubscriptionStore } from '@c9up/nova'
-  //   store: new RedisSubscriptionStore(() => redis.connection()),
-  //
-  //   import { FileSubscriptionStore } from '@c9up/nova'
-  //   store: new FileSubscriptionStore('storage/push_subscriptions.json'),
+  // Which store keeps the subscriptions. Name it in the environment so a
+  // deployment picks its backend without editing this file.
+  default: env.get('NOVA_STORE', 'memory'),
+  stores: {
+    // Forgets everything on restart — fine for tests and local work.
+    memory: stores.memory(),
+    // One JSON file. Single process; see the nova README.
+    file: stores.file({ path: 'storage/push_subscriptions.json' }),
+    // The push_subscriptions table the migration beside this file creates.
+    // sql: stores.sql({ connection: () => app.container.resolve('db') }),
+    // A @c9up/quasar connection, by name.
+    // redis: stores.redis({ connection: 'main' }),
+  },
 
   vapid: {
     publicKey: env.get('NOVA_VAPID_PUBLIC_KEY'),

@@ -17,6 +17,7 @@ export {
 	default as NovaProvider,
 	type NovaAppContext,
 } from "./NovaProvider.js";
+export { quasarConnection } from "./quasar.js";
 export {
 	RedisSubscriptionStore,
 	type RedisSubscriptionStoreOptions,
@@ -35,4 +36,5 @@ export {
 	type PushSubscription,
 	type SubscriptionStore,
 } from "./SubscriptionStore.js";
+export { type SubscriptionStoreFactory, stores } from "./stores.js";
 export { generateVapidKeys, type VapidKeyPair } from "./vapid.js";

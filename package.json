@@ -59,6 +59,7 @@
   },
   "peerDependencies": {
     "@c9up/atlas": "^0.3.0",
+    "@c9up/quasar": "^0.1.0",
     "@c9up/ream": "^0.2.0"
   },
   "dependencies": {
@@ -101,6 +102,9 @@
   },
   "peerDependenciesMeta": {
     "@c9up/atlas": {
+      "optional": true
+    },
+    "@c9up/quasar": {
       "optional": true
     },
     "@c9up/ream": {

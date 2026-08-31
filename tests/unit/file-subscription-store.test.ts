@@ -118,8 +118,105 @@ describe("nova > FileSubscriptionStore", () => {
 		await mkdir(dirname(path), { recursive: true });
 		await writeFile(path, '["something", "else"]', "utf8");
 		await expect(store.listByUser("user-A")).rejects.toThrow(
-			/not a subscription store/,
+			/not a usable subscription store: the file holds a JSON value that is not an object/,
 		);
+	});
+
+	it("refuses a file written by a format it does not know", async () => {
+		await mkdir(dirname(path), { recursive: true });
+		// Read with today's assumptions, a version-2 file would be written back
+		// mangled — carrying the version is only worth anything if it is checked.
+		await writeFile(path, '{"version":2,"subscriptions":{}}', "utf8");
+
+		await expect(store.listByUser("user-A")).rejects.toThrow(
+			/format version is 2/,
+		);
+		expect(await readFile(path, "utf8")).toContain('"version":2');
+	});
+
+	it("refuses a record missing its encryption keys, naming the endpoint", async () => {
+		await mkdir(dirname(path), { recursive: true });
+		await writeFile(
+			path,
+			JSON.stringify({
+				version: 1,
+				subscriptions: {
+					"https://push.example/half": { userId: "user-A", auth: "a" },
+				},
+			}),
+			"utf8",
+		);
+
+		// Left to pass, this reached the push layer as `p256dh: undefined` and
+		// failed there, naming neither the file nor the endpoint.
+		await expect(store.listByUser("user-A")).rejects.toThrow(
+			/https:\/\/push\.example\/half has no `p256dh` string/,
+		);
+	});
+
+	it("refuses a record that is not an object at all", async () => {
+		await mkdir(dirname(path), { recursive: true });
+		await writeFile(
+			path,
+			'{"version":1,"subscriptions":{"https://push.example/x":"hello"}}',
+			"utf8",
+		);
+
+		await expect(store.listByUser("user-A")).rejects.toThrow(
+			/is not an object/,
+		);
+	});
+
+	it("refuses an expirationTime that is neither a number nor null", async () => {
+		await mkdir(dirname(path), { recursive: true });
+		await writeFile(
+			path,
+			JSON.stringify({
+				version: 1,
+				subscriptions: {
+					"https://push.example/x": {
+						userId: "user-A",
+						expirationTime: "soon",
+						p256dh: "p",
+						auth: "a",
+					},
+				},
+			}),
+			"utf8",
+		);
+
+		await expect(store.listByUser("user-A")).rejects.toThrow(
+			/neither a number nor null/,
+		);
+	});
+
+	it("keeps accepting a subscription that never expires", async () => {
+		await mkdir(dirname(path), { recursive: true });
+		await writeFile(
+			path,
+			JSON.stringify({
+				version: 1,
+				subscriptions: {
+					"https://push.example/forever": {
+						userId: "user-A",
+						expirationTime: null,
+						p256dh: "p",
+						auth: "a",
+					},
+				},
+			}),
+			"utf8",
+		);
+
+		// `null` is what most subscriptions carry — a truthiness check here would
+		// have refused every real file.
+		expect(await store.listByUser("user-A")).toEqual([
+			{
+				endpoint: "https://push.example/forever",
+				expirationTime: null,
+				keys: { p256dh: "p", auth: "a" },
+			},
+		]);
 	});
 
 	it("moves an endpoint to its new owner instead of leaving it on both", async () => {

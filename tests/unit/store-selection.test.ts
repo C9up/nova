@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	FileSubscriptionStore,
 	MemorySubscriptionDriver,
+	type NovaAppContext,
 	type NovaConfig,
 	type NovaError,
 	NovaProvider,
@@ -34,23 +35,23 @@ function containerStub() {
 	};
 }
 
-function appWith(config: NovaConfig) {
+function appWith(config: NovaConfig): {
+	bindings: Map<string, () => unknown>;
+	app: NovaAppContext;
+} {
 	const { container, bindings } = containerStub();
 	return {
 		bindings,
-		app: {
-			container,
-			config: { get: <T>() => config as T },
-		},
+		// The provider reads exactly one config key, so the store answers with
+		// the config under test whatever it is asked for.
+		app: { container, config: { get: () => config } },
 	};
 }
 
 /** Register the provider and hand back whatever store it bound. */
 function storeFrom(config: NovaConfig): unknown {
 	const { app, bindings } = appWith(config);
-	// biome-ignore lint/suspicious/noExplicitAny: the provider's app context is
-	// structural; the stub above is the slice register() touches.
-	new NovaProvider(app as any).register();
+	new NovaProvider(app).register();
 	return bindings.get("SubscriptionStore")?.();
 }
 
@@ -159,13 +160,22 @@ describe("nova > store selection", () => {
 	});
 
 	it("resolves a quasar connection by name only when it is used", async () => {
-		// The name is not resolved at config time — quasar may not be installed
-		// in the environment that never selects this store.
+		// The name is not resolved at config time — quasar is an optional peer,
+		// and an application that never selects this store must not need it
+		// installed just to load its config.
 		const factory = stores.redis({ connection: "main" });
 		const store = factory();
 		expect(store).toBeInstanceOf(RedisSubscriptionStore);
 
-		// It fails on use, naming the missing package rather than a module error.
-		await expect(store.listByUser("user-A")).rejects.toThrow(/quasar/);
+		// Resolution is deferred to the first command, and whatever it fails on
+		// reaches the caller. Which failure that is depends on the environment,
+		// and both are correct: without quasar installed, nova's own
+		// E_NOVA_QUASAR_MISSING; with it installed but no application booted —
+		// this workspace — quasar's own initialization message, passed through
+		// rather than masked as "quasar is missing", which would send the reader
+		// to reinstall a package they already have.
+		await expect(store.listByUser("user-A")).rejects.toThrow(
+			/quasar|accessed before initialization/,
+		);
 	});
 });

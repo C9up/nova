@@ -137,8 +137,10 @@ export class FileSubscriptionStore implements SubscriptionStore {
 		if (!isStoreFile(parsed)) {
 			throw new NovaError(
 				"E_NOVA_STORE_FILE_UNREADABLE",
-				`${this.#path} is JSON but not a subscription store.`,
-				{ hint: 'Expected { "version": 1, "subscriptions": { … } }.' },
+				`${this.#path} is JSON but not a usable subscription store: ${storeFileProblem(parsed)}.`,
+				{
+					hint: 'Expected { "version": 1, "subscriptions": { "<endpoint>": { "userId": "…", "expirationTime": null, "p256dh": "…", "auth": "…" } } }. Fix or move the file — reading it as empty would overwrite the subscriptions it still holds.',
+				},
 			);
 		}
 		return parsed;
@@ -169,8 +171,66 @@ function isNotFound(error: unknown): boolean {
 }
 
 function isStoreFile(value: unknown): value is StoreFile {
-	if (typeof value !== "object" || value === null) return false;
-	if (!("subscriptions" in value) || !("version" in value)) return false;
+	return storeFileProblem(value) === null;
+}
+
+/**
+ * What is wrong with the file, or null when nothing is.
+ *
+ * The shape is checked down to the individual record, not just to
+ * `{ version, subscriptions }`. A half-valid entry used to pass: `listByUser`
+ * then handed the push layer `{ p256dh: undefined, auth: undefined }`, and the
+ * failure surfaced far from here as an encryption error naming neither the
+ * file nor the endpoint that caused it.
+ */
+function storeFileProblem(value: unknown): string | null {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return "the file holds a JSON value that is not an object";
+	}
+	if (!("version" in value)) return "the `version` field is missing";
+	// This is the whole point of carrying a version: a file written by a later
+	// format is refused by name, rather than being read with today's
+	// assumptions and written back mangled.
+	if (value.version !== 1) {
+		return `the format version is ${JSON.stringify(value.version)}, and this build only reads version 1`;
+	}
+	if (!("subscriptions" in value))
+		return "the `subscriptions` field is missing";
 	const { subscriptions } = value;
-	return typeof subscriptions === "object" && subscriptions !== null;
+	if (
+		typeof subscriptions !== "object" ||
+		subscriptions === null ||
+		Array.isArray(subscriptions)
+	) {
+		return "`subscriptions` is not an object";
+	}
+	for (const [endpoint, stored] of Object.entries(subscriptions)) {
+		const problem = subscriptionProblem(stored);
+		if (problem !== null) return `the entry for ${endpoint} ${problem}`;
+	}
+	return null;
+}
+
+/** What is wrong with one stored record, or null when nothing is. */
+function subscriptionProblem(value: unknown): string | null {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return "is not an object";
+	}
+	if (!("userId" in value) || typeof value.userId !== "string") {
+		return "has no `userId` string";
+	}
+	if (!("p256dh" in value) || typeof value.p256dh !== "string") {
+		return "has no `p256dh` string";
+	}
+	if (!("auth" in value) || typeof value.auth !== "string") {
+		return "has no `auth` string";
+	}
+	// `null` is the legitimate value for a subscription that does not expire,
+	// which is most of them — so the check is null-or-number, not truthiness.
+	if (!("expirationTime" in value)) return "has no `expirationTime`";
+	const { expirationTime } = value;
+	if (expirationTime !== null && typeof expirationTime !== "number") {
+		return "has an `expirationTime` that is neither a number nor null";
+	}
+	return null;
 }

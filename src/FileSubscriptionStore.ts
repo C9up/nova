@@ -21,13 +21,24 @@
  * {@link RedisSubscriptionStore}.
  */
 
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { subscriptionProblem } from "./_internal/subscription.js";
 import { NovaError } from "./errors.js";
 import type {
 	PushSubscription,
 	SubscriptionStore,
 } from "./SubscriptionStore.js";
+
+/**
+ * Owner read/write, nothing for anyone else.
+ *
+ * The file holds push endpoints and the `auth` secret each browser issued —
+ * enough to send notifications as the application to every subscriber. Left to
+ * the umask it is world-readable on a default Debian or Alpine image, where
+ * every other process in the container can read it.
+ */
+const OWNER_ONLY = 0o600;
 
 /** One stored subscription, keyed by the endpoint that identifies it. */
 interface StoredSubscription {
@@ -54,6 +65,26 @@ export class FileSubscriptionStore implements SubscriptionStore {
 	}
 
 	async save(userId: string, subscription: PushSubscription): Promise<void> {
+		// Checked on the way in as well as on the way out, so the strictness of
+		// #read can only ever be triggered by a hand-edited file — never by this
+		// store writing something it will later refuse to read, which would brick
+		// the file for every subscription already in it.
+		const problem = subscriptionProblem({
+			endpoint: subscription.endpoint,
+			expirationTime: subscription.expirationTime,
+			p256dh: subscription.keys.p256dh,
+			auth: subscription.keys.auth,
+		});
+		if (problem !== null) {
+			throw new NovaError(
+				"E_NOVA_INVALID_SUBSCRIPTION",
+				`This subscription cannot be stored: ${problem}.`,
+				{
+					hint: "Subscriptions arriving through the subscribe endpoint are already checked; a hand-built one has to hold the same values a browser sends.",
+				},
+			);
+		}
+
 		await this.#mutate((file) => {
 			// Whoever held this endpoint before loses it: a push endpoint is
 			// globally unique per push service, so a browser reused across a
@@ -156,7 +187,16 @@ export class FileSubscriptionStore implements SubscriptionStore {
 	async #write(file: StoreFile): Promise<void> {
 		await mkdir(dirname(this.#path), { recursive: true });
 		const temporary = `${this.#path}.tmp`;
-		await writeFile(temporary, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+		await writeFile(temporary, `${JSON.stringify(file, null, 2)}\n`, {
+			encoding: "utf8",
+			mode: OWNER_ONLY,
+		});
+		// `mode` on writeFile only applies when the file is created, and a crash
+		// mid-write leaves the temporary one behind — reusing it would keep
+		// whatever permissions it was born with. The final file inherits this
+		// mode through the rename, which is what fixes an existing store written
+		// by an earlier version under a permissive umask.
+		await chmod(temporary, OWNER_ONLY);
 		await rename(temporary, this.#path);
 	}
 }
@@ -205,32 +245,36 @@ function storeFileProblem(value: unknown): string | null {
 		return "`subscriptions` is not an object";
 	}
 	for (const [endpoint, stored] of Object.entries(subscriptions)) {
-		const problem = subscriptionProblem(stored);
+		const problem = recordProblem(endpoint, stored);
 		if (problem !== null) return `the entry for ${endpoint} ${problem}`;
 	}
 	return null;
 }
 
-/** What is wrong with one stored record, or null when nothing is. */
-function subscriptionProblem(value: unknown): string | null {
+/**
+ * What is wrong with one stored record, or null when nothing is.
+ *
+ * The endpoint is the map key rather than a field, so it is passed in and
+ * checked alongside the rest: it is the value every other store keys on, and a
+ * hand-edited file is exactly where a malformed one appears.
+ *
+ * The rules are the ones the subscribe endpoint applies to an arriving
+ * subscription — checking less here would only move the failure to the push
+ * layer, where the message names neither this file nor this endpoint.
+ */
+function recordProblem(endpoint: string, value: unknown): string | null {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {
 		return "is not an object";
 	}
 	if (!("userId" in value) || typeof value.userId !== "string") {
 		return "has no `userId` string";
 	}
-	if (!("p256dh" in value) || typeof value.p256dh !== "string") {
-		return "has no `p256dh` string";
-	}
-	if (!("auth" in value) || typeof value.auth !== "string") {
-		return "has no `auth` string";
-	}
-	// `null` is the legitimate value for a subscription that does not expire,
-	// which is most of them — so the check is null-or-number, not truthiness.
-	if (!("expirationTime" in value)) return "has no `expirationTime`";
-	const { expirationTime } = value;
-	if (expirationTime !== null && typeof expirationTime !== "number") {
-		return "has an `expirationTime` that is neither a number nor null";
-	}
-	return null;
+	const problem = subscriptionProblem({
+		endpoint,
+		expirationTime:
+			"expirationTime" in value ? value.expirationTime : undefined,
+		p256dh: "p256dh" in value ? value.p256dh : undefined,
+		auth: "auth" in value ? value.auth : undefined,
+	});
+	return problem === null ? null : `— ${problem}`;
 }

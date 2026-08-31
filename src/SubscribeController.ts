@@ -9,6 +9,7 @@
  * route was registered without a guard (test-only — config sets guard=null).
  */
 
+import { isSubscriptionFields } from "./_internal/subscription.js";
 import { NovaError } from "./errors.js";
 import type {
 	PushSubscription,
@@ -26,15 +27,6 @@ interface HttpContextLike {
 	response: { status(code: number): { json(data: unknown): void } };
 	auth?: { user?: { id?: string } };
 }
-
-// Matches the `endpoint VARCHAR(768)` storage column (InnoDB PK index budget) so
-// an over-long endpoint is rejected with a controlled 400 at the boundary instead
-// of failing deep with a dialect-specific DB length error on insert. Real push
-// endpoints (FCM / Mozilla autopush / Apple) are all < 200 chars.
-const MAX_ENDPOINT_LENGTH = 768;
-const BASE64URL_CHARS = /^[A-Za-z0-9_-]+$/;
-const P256DH_LENGTH_RANGE: readonly [number, number] = [86, 90];
-const AUTH_LENGTH_RANGE: readonly [number, number] = [22, 26];
 
 export class SubscribeController {
 	#store: SubscriptionStore;
@@ -71,47 +63,31 @@ export class SubscribeController {
 	}
 }
 
-function isHttpsUrl(value: unknown): value is string {
-	return (
-		typeof value === "string" &&
-		value.length <= MAX_ENDPOINT_LENGTH &&
-		/^https:\/\//i.test(value)
-	);
-}
-
-function isBase64UrlInRange(
-	value: unknown,
-	[min, max]: readonly [number, number],
-): value is string {
-	return (
-		typeof value === "string" &&
-		value.length >= min &&
-		value.length <= max &&
-		BASE64URL_CHARS.test(value)
-	);
-}
-
+/**
+ * The posted body as a subscription, or null when it is not one.
+ *
+ * The shape is unpacked here; what makes the values usable lives in
+ * `subscriptionProblem`, which the file store applies to the records it reads
+ * back. One set of rules, checked on the way in and on the way out.
+ */
 function parseSubscription(body: unknown): PushSubscription | null {
 	if (typeof body !== "object" || body === null) return null;
-	const candidate = body as Record<string, unknown>;
-	const { endpoint, expirationTime, keys } = candidate;
-	if (!isHttpsUrl(endpoint)) return null;
-	if (expirationTime !== null) {
-		if (
-			typeof expirationTime !== "number" ||
-			!Number.isFinite(expirationTime) ||
-			expirationTime < 0
-		) {
-			return null;
-		}
-	}
+	if (!("endpoint" in body) || !("expirationTime" in body)) return null;
+	if (!("keys" in body)) return null;
+	const { keys } = body;
 	if (typeof keys !== "object" || keys === null) return null;
-	const keyShape = keys as Record<string, unknown>;
-	if (!isBase64UrlInRange(keyShape.p256dh, P256DH_LENGTH_RANGE)) return null;
-	if (!isBase64UrlInRange(keyShape.auth, AUTH_LENGTH_RANGE)) return null;
+
+	const fields = {
+		endpoint: body.endpoint,
+		expirationTime: body.expirationTime,
+		p256dh: "p256dh" in keys ? keys.p256dh : undefined,
+		auth: "auth" in keys ? keys.auth : undefined,
+	};
+	if (!isSubscriptionFields(fields)) return null;
+
 	return {
-		endpoint,
-		expirationTime,
-		keys: { p256dh: keyShape.p256dh, auth: keyShape.auth },
+		endpoint: fields.endpoint,
+		expirationTime: fields.expirationTime,
+		keys: { p256dh: fields.p256dh, auth: fields.auth },
 	};
 }

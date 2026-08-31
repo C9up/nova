@@ -1,4 +1,12 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+	chmod,
+	mkdir,
+	mkdtemp,
+	readFile,
+	rm,
+	stat,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -16,6 +24,23 @@ import {
  * hand. A store that loses subscriptions quietly is worse than one that has
  * none, because nobody finds out until the notifications stop.
  */
+/**
+ * A subscription shaped like a browser's.
+ *
+ * The keys have to be real base64url of the real lengths — an uncompressed
+ * P-256 point and a 16-byte secret — because the store now applies the same
+ * rules to what it writes as the subscribe endpoint applies to what arrives.
+ */
+function keyOfLength(seed: string, length: number): string {
+	const alphabet =
+		"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+	let out = "";
+	for (let index = 0; index < length; index++) {
+		out += alphabet[(seed.charCodeAt(index % seed.length) + index) % 64];
+	}
+	return out;
+}
+
 function subscription(
 	endpoint: string,
 	expirationTime: number | null = null,
@@ -23,7 +48,10 @@ function subscription(
 	return {
 		endpoint,
 		expirationTime,
-		keys: { p256dh: `p256dh-${endpoint}`, auth: `auth-${endpoint}` },
+		keys: {
+			p256dh: keyOfLength(`p256dh-${endpoint}`, 87),
+			auth: keyOfLength(`auth-${endpoint}`, 22),
+		},
 	};
 }
 
@@ -49,14 +77,7 @@ describe("nova > FileSubscriptionStore", () => {
 		);
 
 		expect(await store.listByUser("user-A")).toEqual([
-			{
-				endpoint: "https://push.example/one",
-				expirationTime: 1893456000000,
-				keys: {
-					p256dh: "p256dh-https://push.example/one",
-					auth: "auth-https://push.example/one",
-				},
-			},
+			subscription("https://push.example/one", 1893456000000),
 		]);
 	});
 
@@ -141,7 +162,11 @@ describe("nova > FileSubscriptionStore", () => {
 			JSON.stringify({
 				version: 1,
 				subscriptions: {
-					"https://push.example/half": { userId: "user-A", auth: "a" },
+					"https://push.example/half": {
+						userId: "user-A",
+						expirationTime: null,
+						auth: keyOfLength("auth", 22),
+					},
 				},
 			}),
 			"utf8",
@@ -150,7 +175,7 @@ describe("nova > FileSubscriptionStore", () => {
 		// Left to pass, this reached the push layer as `p256dh: undefined` and
 		// failed there, naming neither the file nor the endpoint.
 		await expect(store.listByUser("user-A")).rejects.toThrow(
-			/https:\/\/push\.example\/half has no `p256dh` string/,
+			/entry for https:\/\/push\.example\/half — the `p256dh` key is not a string/,
 		);
 	});
 
@@ -177,8 +202,8 @@ describe("nova > FileSubscriptionStore", () => {
 					"https://push.example/x": {
 						userId: "user-A",
 						expirationTime: "soon",
-						p256dh: "p",
-						auth: "a",
+						p256dh: keyOfLength("p256dh", 87),
+						auth: keyOfLength("auth", 22),
 					},
 				},
 			}),
@@ -186,7 +211,7 @@ describe("nova > FileSubscriptionStore", () => {
 		);
 
 		await expect(store.listByUser("user-A")).rejects.toThrow(
-			/neither a number nor null/,
+			/neither null nor a finite, non-negative number/,
 		);
 	});
 
@@ -200,8 +225,8 @@ describe("nova > FileSubscriptionStore", () => {
 					"https://push.example/forever": {
 						userId: "user-A",
 						expirationTime: null,
-						p256dh: "p",
-						auth: "a",
+						p256dh: keyOfLength("p256dh", 87),
+						auth: keyOfLength("auth", 22),
 					},
 				},
 			}),
@@ -214,9 +239,99 @@ describe("nova > FileSubscriptionStore", () => {
 			{
 				endpoint: "https://push.example/forever",
 				expirationTime: null,
-				keys: { p256dh: "p", auth: "a" },
+				keys: {
+					p256dh: keyOfLength("p256dh", 87),
+					auth: keyOfLength("auth", 22),
+				},
 			},
 		]);
+	});
+
+	it("refuses a record whose endpoint key is not an https URL", async () => {
+		await mkdir(dirname(path), { recursive: true });
+		await writeFile(
+			path,
+			JSON.stringify({
+				version: 1,
+				subscriptions: {
+					"http://push.example/plain": {
+						userId: "user-A",
+						expirationTime: null,
+						p256dh: keyOfLength("p256dh", 87),
+						auth: keyOfLength("auth", 22),
+					},
+				},
+			}),
+			"utf8",
+		);
+
+		await expect(store.listByUser("user-A")).rejects.toThrow(
+			/the endpoint is not an https URL/,
+		);
+	});
+
+	it("refuses a key that is the right shape but the wrong length", async () => {
+		await mkdir(dirname(path), { recursive: true });
+		await writeFile(
+			path,
+			JSON.stringify({
+				version: 1,
+				subscriptions: {
+					"https://push.example/short": {
+						userId: "user-A",
+						expirationTime: null,
+						// Truncated: base64url, but not a P-256 point. Left to pass,
+						// this failed in the push layer's encryption instead.
+						p256dh: keyOfLength("p256dh", 40),
+						auth: keyOfLength("auth", 22),
+					},
+				},
+			}),
+			"utf8",
+		);
+
+		await expect(store.listByUser("user-A")).rejects.toThrow(
+			/`p256dh` key is 40 characters, outside the 86–90/,
+		);
+	});
+
+	it("refuses to write a subscription it would later refuse to read", async () => {
+		// Without this, a store could brick its own file: one loose record
+		// written, and every subscription in it becomes unreadable.
+		await expect(
+			store.save("user-A", {
+				endpoint: "https://push.example/bad",
+				expirationTime: null,
+				keys: { p256dh: "too-short", auth: keyOfLength("auth", 22) },
+			}),
+		).rejects.toThrow(/cannot be stored/);
+
+		await store.save("user-B", subscription("https://push.example/good"));
+		expect(await store.listByUser("user-B")).toHaveLength(1);
+	});
+
+	it("keeps the file to its owner", async () => {
+		await store.save("user-A", subscription("https://push.example/one"));
+
+		// The file holds the auth secret of every subscriber — enough to send
+		// notifications as the application. World-readable is the umask default
+		// on a stock container image.
+		const mode = (await stat(path)).mode & 0o777;
+		expect(mode).toBe(0o600);
+	});
+
+	it("tightens a file an earlier version left world-readable", async () => {
+		await store.save("user-A", subscription("https://push.example/one"));
+		await chmod(path, 0o644);
+		// A leftover temporary from a crash must not carry its permissions over
+		// either, which is why the mode is reasserted rather than only requested
+		// at creation.
+		await writeFile(`${path}.tmp`, "{}", { encoding: "utf8", mode: 0o644 });
+
+		await store.save("user-B", subscription("https://push.example/two"));
+
+		expect((await stat(path)).mode & 0o777).toBe(0o600);
+		expect(await store.listByUser("user-A")).toHaveLength(1);
 	});
 
 	it("moves an endpoint to its new owner instead of leaving it on both", async () => {

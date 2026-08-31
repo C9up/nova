@@ -40,7 +40,7 @@ export class SubscribeController {
 		if (!subscription) {
 			ctx.response.status(400).json({
 				error: {
-					code: "NOVA_INVALID_SUBSCRIPTION",
+					code: "E_NOVA_INVALID_SUBSCRIPTION",
 					message: "Invalid PushSubscription payload",
 					hint: "See https://developer.mozilla.org/docs/Web/API/PushSubscription for the expected shape.",
 				},
@@ -51,7 +51,7 @@ export class SubscribeController {
 		const userId = ctx.auth?.user?.id;
 		if (typeof userId !== "string" || userId.length === 0) {
 			throw new NovaError(
-				"NOVA_MISSING_USER",
+				"E_NOVA_MISSING_USER",
 				"Subscription handler reached without an authenticated user. Did you disable the guard?",
 			);
 		}

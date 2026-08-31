@@ -256,10 +256,10 @@ describe("Nova > push() — error mapping", () => {
 });
 
 describe("Nova > VAPID validation", () => {
-	it("throws NOVA_VAPID_NOT_CONFIGURED on first push when vapid is undefined", async () => {
+	it("throws E_NOVA_VAPID_NOT_CONFIGURED on first push when vapid is undefined", async () => {
 		const nova = new Nova(new MemorySubscriptionDriver(), undefined);
 		await expect(nova.push(SUB_A, PAYLOAD)).rejects.toMatchObject({
-			code: "NOVA_VAPID_NOT_CONFIGURED",
+			code: "E_NOVA_VAPID_NOT_CONFIGURED",
 		});
 	});
 
@@ -278,13 +278,13 @@ describe("Nova > VAPID validation", () => {
 		);
 	});
 
-	it("throws NOVA_VAPID_NOT_CONFIGURED when subject has wrong prefix", async () => {
+	it("throws E_NOVA_VAPID_NOT_CONFIGURED when subject has wrong prefix", async () => {
 		const nova = new Nova(new MemorySubscriptionDriver(), {
 			...VALID_VAPID,
 			subject: "ftp://nope",
 		});
 		await expect(nova.push(SUB_A, PAYLOAD)).rejects.toMatchObject({
-			code: "NOVA_VAPID_NOT_CONFIGURED",
+			code: "E_NOVA_VAPID_NOT_CONFIGURED",
 		});
 	});
 

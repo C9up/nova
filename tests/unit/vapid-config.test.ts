@@ -21,9 +21,9 @@ describe("validateVapidConfig", () => {
 		expect(result.subject).toBe("https://app.example/");
 	});
 
-	it("throws NOVA_VAPID_NOT_CONFIGURED when config is undefined", () => {
+	it("throws E_NOVA_VAPID_NOT_CONFIGURED when config is undefined", () => {
 		expect(() => validateVapidConfig(undefined)).toThrow(
-			expect.objectContaining({ code: "NOVA_VAPID_NOT_CONFIGURED" }),
+			expect.objectContaining({ code: "E_NOVA_VAPID_NOT_CONFIGURED" }),
 		);
 	});
 

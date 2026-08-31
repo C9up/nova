@@ -1,6 +1,6 @@
 /**
  * Integration test — calling `nova.push()` with no/incomplete VAPID config
- * must throw `NovaError('NOVA_VAPID_NOT_CONFIGURED', ...)` on the first
+ * must throw `NovaError('E_NOVA_VAPID_NOT_CONFIGURED', ...)` on the first
  * push, NOT at construction time (so apps that never push don't fail to
  * boot just because the env vars aren't wired).
  */
@@ -29,10 +29,10 @@ describe("nova.push() — VAPID misconfiguration", () => {
 		).not.toThrow();
 	});
 
-	it("throws NovaError(NOVA_VAPID_NOT_CONFIGURED) on first push", async () => {
+	it("throws NovaError(E_NOVA_VAPID_NOT_CONFIGURED) on first push", async () => {
 		const nova = new Nova(new MemorySubscriptionDriver(), undefined);
 		await expect(nova.push(SUB, { title: "boom" })).rejects.toMatchObject({
-			code: "NOVA_VAPID_NOT_CONFIGURED",
+			code: "E_NOVA_VAPID_NOT_CONFIGURED",
 		});
 	});
 

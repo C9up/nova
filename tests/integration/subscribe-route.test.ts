@@ -187,7 +187,7 @@ describe("nova > subscribe route (integration)", () => {
 		expect(stored[0]?.endpoint).toBe(VALID_BODY.endpoint);
 	});
 
-	it("returns 400 with NOVA_INVALID_SUBSCRIPTION on malformed body", async () => {
+	it("returns 400 with E_NOVA_INVALID_SUBSCRIPTION on malformed body", async () => {
 		const { router, routes } = makeRouter();
 		const store = new MemorySubscriptionDriver();
 		const app = makeApp({ router, store });
@@ -202,7 +202,7 @@ describe("nova > subscribe route (integration)", () => {
 
 		expect(captured.status).toBe(400);
 		const errorBody = captured.body as { error: { code: string } };
-		expect(errorBody.error.code).toBe("NOVA_INVALID_SUBSCRIPTION");
+		expect(errorBody.error.code).toBe("E_NOVA_INVALID_SUBSCRIPTION");
 		expect(await store.listByUser("user-1")).toEqual([]);
 	});
 
@@ -227,7 +227,7 @@ describe("nova > subscribe route (integration)", () => {
 
 		expect(captured.status).toBe(400);
 		expect((captured.body as { error: { code: string } }).error.code).toBe(
-			"NOVA_INVALID_SUBSCRIPTION",
+			"E_NOVA_INVALID_SUBSCRIPTION",
 		);
 		expect(await store.listByUser("user-1")).toEqual([]);
 	});
@@ -252,7 +252,7 @@ describe("nova > subscribe route (integration)", () => {
 		expect(await store.listByUser("user-1")).toHaveLength(1);
 	});
 
-	it("throws NOVA_MISSING_USER when the guard was disabled and no auth context exists", async () => {
+	it("throws E_NOVA_MISSING_USER when the guard was disabled and no auth context exists", async () => {
 		const { router, routes } = makeRouter();
 		const store = new MemorySubscriptionDriver();
 		const app = makeApp({ router, store, novaConfig: { guard: null } });
@@ -264,7 +264,7 @@ describe("nova > subscribe route (integration)", () => {
 		if (!handler) throw new Error("handler not captured");
 		const { ctx } = makeCtx(undefined, VALID_BODY);
 		await expect(handler(ctx)).rejects.toMatchObject({
-			code: "NOVA_MISSING_USER",
+			code: "E_NOVA_MISSING_USER",
 		});
 	});
 

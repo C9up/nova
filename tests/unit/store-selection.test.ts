@@ -24,12 +24,15 @@ function containerStub() {
 	return {
 		bindings,
 		container: {
-			singleton(token: string, factory: () => unknown) {
-				bindings.set(token, factory);
+			// `string | symbol`, as ContainerLike declares it — narrowing the
+			// stub to `string` is what made it incompatible with the interface
+			// the provider is actually handed.
+			singleton(token: string | symbol, factory: () => unknown) {
+				bindings.set(String(token), factory);
 			},
-			has: (token: string) => bindings.has(token),
-			async resolve(token: string) {
-				return bindings.get(token)?.();
+			has: (token: string | symbol) => bindings.has(String(token)),
+			async resolve<T = unknown>(token: string | symbol): Promise<T> {
+				return bindings.get(String(token))?.() as T;
 			},
 		},
 	};
@@ -44,7 +47,10 @@ function appWith(config: NovaConfig): {
 		bindings,
 		// The provider reads exactly one config key, so the store answers with
 		// the config under test whatever it is asked for.
-		app: { container, config: { get: () => config } },
+		// One cast, at the stub boundary: `get<T>` is generic over what the
+		// caller asks for, and a stub that always answers with one value
+		// cannot express that any other way.
+		app: { container, config: { get: <T = unknown>() => config as T } },
 	};
 }
 

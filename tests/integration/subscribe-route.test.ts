@@ -10,7 +10,9 @@
  */
 
 import { describe, expect, it } from "vitest";
-import NovaProvider from "../../src/NovaProvider.js";
+import NovaProvider, {
+	type NovaAppContext,
+} from "../../src/NovaProvider.js";
 import {
 	MemorySubscriptionDriver,
 	type PushSubscription,
@@ -40,16 +42,6 @@ function makeRouter() {
 	return { router, routes };
 }
 
-interface AppLike {
-	container: {
-		singleton(token: string | symbol, factory: () => unknown): void;
-		resolve<T = unknown>(token: string | symbol): T;
-	};
-	config: {
-		get<T = unknown>(key: string): T | undefined;
-	};
-}
-
 function makeApp({
 	router,
 	store,
@@ -58,7 +50,7 @@ function makeApp({
 	router: unknown;
 	store?: SubscriptionStore;
 	novaConfig?: Record<string, unknown>;
-}): AppLike {
+}): NovaAppContext {
 	const factories = new Map<string | symbol, () => unknown>();
 	const instances = new Map<string | symbol, unknown>();
 	factories.set("router", () => router);
@@ -70,7 +62,7 @@ function makeApp({
 			singleton(token, factory) {
 				factories.set(token, factory);
 			},
-			resolve<T = unknown>(token: string | symbol): T {
+			async resolve<T = unknown>(token: string | symbol): Promise<T> {
 				if (instances.has(token)) return instances.get(token) as T;
 				const factory = factories.get(token);
 				if (!factory) throw new Error(`token not registered: ${String(token)}`);

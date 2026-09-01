@@ -8,14 +8,15 @@
  * time, far from any real use, which is what makes this worth pinning.
  */
 import { describe, expect, it } from "vitest";
-import type { Nova } from "../../src/Nova.js";
+import type { Nova, PushPayload } from "../../src/Nova.js";
 import push, { getPush, setPush } from "../../src/services/main.js";
 
 /** Just enough of a Nova to prove binding and forwarding. */
 function fakeNova(): Nova {
 	const self = {
 		marker: "the-instance",
-		pushToUser(userId: string) {
+		// The real arity, so the stub cannot drift from what it stands in for.
+		pushToUser(userId: string, _payload: PushPayload) {
 			// `this` must be the instance, which is what `.bind` is there for.
 			return `${userId}@${(this as { marker: string }).marker}`;
 		},
@@ -59,7 +60,7 @@ describe("nova > the service accessor after boot", () => {
 		// Taken off the proxy and called detached — `this` still has to be the
 		// instance, or every `push.pushToUser(...)` in an application breaks.
 		const { pushToUser } = push;
-		expect(pushToUser("u-1")).toBe("u-1@the-instance");
+		expect(pushToUser("u-1", { title: "hi" })).toBe("u-1@the-instance");
 	});
 
 	it("forwards a non-function member as it is", () => {

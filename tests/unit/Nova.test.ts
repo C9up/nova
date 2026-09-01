@@ -330,7 +330,7 @@ describe("Nova > pushToUser()", () => {
 	});
 
 	it("isolates per-subscription failures (one 410, one 200 → both reported, gone one cleaned)", async () => {
-		sendNotificationSpy.mockImplementation(async (sub) => {
+		sendNotificationSpy.mockImplementation(async (sub: PushSubscription) => {
 			if (sub.endpoint === SUB_A.endpoint) {
 				const err = webPushError(410, SUB_A.endpoint);
 				throw err;
@@ -439,7 +439,7 @@ describe("Nova > isWebPushError stricter discrimination (review patch)", () => {
 describe("Nova > pushToUser per-subscription error isolation (review patch)", () => {
 	it("isolates a thrown error on one device — others still get a result", async () => {
 		const networkErr = new Error("ECONNRESET");
-		sendNotificationSpy.mockImplementation(async (sub) => {
+		sendNotificationSpy.mockImplementation(async (sub: PushSubscription) => {
 			if (sub.endpoint === SUB_A.endpoint) throw networkErr;
 			return { statusCode: 201, body: "", headers: {} };
 		});

@@ -19,6 +19,13 @@ import {
 	type FakeNovaPredicate,
 } from "../../src/testing/FakeNova.js";
 
+/** Narrow away null/undefined without a `!` assertion (which lies to the compiler). */
+function defined<T>(value: T | null | undefined): T {
+	if (value == null) throw new Error("expected a defined value");
+	return value;
+}
+
+
 const SUB_A: PushSubscription = {
 	endpoint: "https://fcm.googleapis.com/wp/AAA111",
 	expirationTime: null,
@@ -56,10 +63,11 @@ describe("FakeNova — construction + push() capture", () => {
 		});
 		const captured = fake.getPushed();
 		expect(captured).toHaveLength(1);
-		expect(captured[0].kind).toBe("single");
-		if (captured[0].kind === "single") {
-			expect(captured[0].subscription.endpoint).toBe(SUB_A.endpoint);
-			expect(captured[0].payload.title).toBe("Welcome");
+		const entry0 = defined(captured[0]);
+		expect(entry0.kind).toBe("single");
+		if (entry0.kind === "single") {
+			expect(entry0.subscription.endpoint).toBe(SUB_A.endpoint);
+			expect(entry0.payload.title).toBe("Welcome");
 		}
 	});
 
@@ -68,7 +76,7 @@ describe("FakeNova — construction + push() capture", () => {
 		const opts: PushOptions = { ttl: 120, urgency: "high", topic: "welcome" };
 		await fake.push(SUB_A, welcomePayload(), opts);
 		const captured = fake.getPushed();
-		expect(captured[0].options).toEqual(opts);
+		expect(defined(captured[0]).options).toEqual(opts);
 	});
 });
 
@@ -79,9 +87,10 @@ describe("FakeNova — pushToUser() capture", () => {
 		expect(result).toEqual([]);
 		const captured = fake.getPushed();
 		expect(captured).toHaveLength(1);
-		expect(captured[0].kind).toBe("fan-out");
-		if (captured[0].kind === "fan-out") {
-			expect(captured[0].userId).toBe("user-A");
+		const entry0 = defined(captured[0]);
+		expect(entry0.kind).toBe("fan-out");
+		if (entry0.kind === "fan-out") {
+			expect(entry0.userId).toBe("user-A");
 		}
 	});
 
@@ -114,21 +123,23 @@ describe("FakeNova — defensive snapshot in getPushed()", () => {
 		await fake.push(SUB_A, welcomePayload());
 		const first = fake.getPushed();
 		// Tamper with the returned snapshot
-		(first[0] as { payload: PushPayload }).payload.title = "Tampered";
+		(defined(first[0]) as { payload: PushPayload }).payload.title = "Tampered";
 		const second = fake.getPushed();
-		expect(second[0].payload.title).toBe("Welcome");
+		expect(defined(second[0]).payload.title).toBe("Welcome");
 	});
 
 	it("subscription mutations on the returned object don't bleed back", async () => {
 		const fake = new FakeNova();
 		await fake.push(SUB_A, welcomePayload());
 		const first = fake.getPushed();
-		if (first[0].kind === "single") {
-			first[0].subscription.keys.p256dh = "tampered";
+		const tampered = defined(first[0]);
+		if (tampered.kind === "single") {
+			tampered.subscription.keys.p256dh = "tampered";
 		}
 		const second = fake.getPushed();
-		if (second[0].kind === "single") {
-			expect(second[0].subscription.keys.p256dh).not.toBe("tampered");
+		const fresh = defined(second[0]);
+		if (fresh.kind === "single") {
+			expect(fresh.subscription.keys.p256dh).not.toBe("tampered");
 		}
 	});
 });
@@ -329,9 +340,9 @@ describe("FakeNova — deep clone of payload.data", () => {
 			welcomePayload({ data: { tags: ["a", "b"] } }),
 		);
 		const first = fake.getPushed();
-		(first[0].payload.data as { tags: string[] }).tags.push("tampered");
+		(defined(first[0]).payload.data as { tags: string[] }).tags.push("tampered");
 		const second = fake.getPushed();
-		expect((second[0].payload.data as { tags: string[] }).tags).toEqual([
+		expect((defined(second[0]).payload.data as { tags: string[] }).tags).toEqual([
 			"a",
 			"b",
 		]);
@@ -345,7 +356,7 @@ describe("FakeNova — deep clone of payload.data", () => {
 			welcomePayload({ data: { when: original as unknown as string } }),
 		);
 		const snapshot = fake.getPushed();
-		const snappedDate = (snapshot[0].payload.data as { when: Date }).when;
+		const snappedDate = (defined(snapshot[0]).payload.data as { when: Date }).when;
 		expect(snappedDate.getTime()).toBe(original.getTime());
 		// structuredClone produces a NEW Date instance
 		expect(snappedDate).not.toBe(original);
@@ -362,9 +373,10 @@ describe("FakeNova — defensive cloneSubscription on missing keys", () => {
 		};
 		await fake.push(subWithoutKeys, welcomePayload());
 		const captured = fake.getPushed();
-		expect(captured[0].kind).toBe("single");
-		if (captured[0].kind === "single") {
-			expect(captured[0].subscription.keys).toEqual({ p256dh: "", auth: "" });
+		const entry0 = defined(captured[0]);
+		expect(entry0.kind).toBe("single");
+		if (entry0.kind === "single") {
+			expect(entry0.subscription.keys).toEqual({ p256dh: "", auth: "" });
 		}
 	});
 });

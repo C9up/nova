@@ -18,6 +18,13 @@ import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 import { configure, SW_TEMPLATE } from "../../src/configure.js";
 
+/** Narrow away null/undefined without a `!` assertion (which lies to the compiler). */
+function defined<T>(value: T | null | undefined): T {
+	if (value == null) throw new Error("expected a defined value");
+	return value;
+}
+
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATION_PATH = path.resolve(
 	HERE,
@@ -79,14 +86,16 @@ describe("configure hook — codemods writes (config/nova.ts + migration + publi
 		// installing nova is all a user does to get `ream nova:vapid:generate`.
 		expect(fake.commands).toEqual(["@c9up/nova/commands"]);
 		expect(fake.envVars).toHaveLength(1);
-		expect(fake.envVars[0]).toMatchObject({
+		expect(defined(fake.envVars[0])).toMatchObject({
 			NOVA_VAPID_PUBLIC_KEY: "",
 			NOVA_VAPID_PRIVATE_KEY: "",
 			NOVA_VAPID_SUBJECT: "mailto:noreply@localhost",
 		});
 
 		expect(fake.writes).toHaveLength(3);
-		const [configWrite, migrationWrite, swWrite] = fake.writes;
+		const configWrite = defined(fake.writes[0]);
+		const migrationWrite = defined(fake.writes[1]);
+		const swWrite = defined(fake.writes[2]);
 		expect(configWrite.filePath).toBe("config/nova.ts");
 		expect(migrationWrite.filePath).toBe(
 			"database/migrations/0048_create_push_subscriptions.ts",
@@ -97,14 +106,14 @@ describe("configure hook — codemods writes (config/nova.ts + migration + publi
 	it("writes the migration content byte-for-byte from the shipped template", async () => {
 		const fake = makeFakeCodemods();
 		await configure(fake.codemods);
-		const migrationWrite = fake.writes[1];
+		const migrationWrite = defined(fake.writes[1]);
 		expect(migrationWrite.content).toBe(migrationTemplate);
 	});
 
 	it("writes the SW content byte-for-byte from the inlined SW_TEMPLATE", async () => {
 		const fake = makeFakeCodemods();
 		await configure(fake.codemods);
-		const swWrite = fake.writes[2];
+		const swWrite = defined(fake.writes[2]);
 		expect(swWrite.content).toBe(SW_TEMPLATE);
 	});
 
@@ -121,7 +130,7 @@ describe("configure hook — codemods writes (config/nova.ts + migration + publi
 	it("does NOT pass force=true on the migration write (idempotency by path)", async () => {
 		const fake = makeFakeCodemods();
 		await configure(fake.codemods);
-		const migrationWrite = fake.writes[1];
+		const migrationWrite = defined(fake.writes[1]);
 		// `options` is either undefined OR has `force` falsy. The
 		// `createCodemods` impl in @c9up/ream skips when the file exists
 		// and force is unset.
@@ -131,7 +140,7 @@ describe("configure hook — codemods writes (config/nova.ts + migration + publi
 	it("does NOT pass force=true on the SW write (idempotency by path)", async () => {
 		const fake = makeFakeCodemods();
 		await configure(fake.codemods);
-		const swWrite = fake.writes[2];
+		const swWrite = defined(fake.writes[2]);
 		expect(swWrite.options?.force).not.toBe(true);
 	});
 
@@ -143,7 +152,7 @@ describe("configure hook — codemods writes (config/nova.ts + migration + publi
 	it("config/nova.ts content includes the vapid block from 48.2", async () => {
 		const fake = makeFakeCodemods();
 		await configure(fake.codemods);
-		const configWrite = fake.writes[0];
+		const configWrite = defined(fake.writes[0]);
 		expect(configWrite.content).toMatch(/defineConfig\(/);
 		expect(configWrite.content).toMatch(/vapid:\s*{/);
 		expect(configWrite.content).toMatch(
@@ -154,7 +163,7 @@ describe("configure hook — codemods writes (config/nova.ts + migration + publi
 	it("config/nova.ts template never mentions sw.js (positive anti-regression)", async () => {
 		const fake = makeFakeCodemods();
 		await configure(fake.codemods);
-		const configWrite = fake.writes[0];
+		const configWrite = defined(fake.writes[0]);
 		// Stronger than checking for the literal "ships in Story 48.4" string:
 		// the config/nova.ts template's job is to wire VAPID, NOT to talk about
 		// the Service Worker. Any mention of sw.js / Service Worker in this

@@ -9,6 +9,13 @@
 import { describe, expect, it } from "vitest";
 import { getCommand, getMetaData } from "../../src/commands/index.js";
 
+/** Narrow away null/undefined without a `!` assertion (which lies to the compiler). */
+function defined<T>(value: T | null | undefined): T {
+	if (value == null) throw new Error("expected a defined value");
+	return value;
+}
+
+
 describe("nova > the command loader", () => {
 	it("lists the commands with their names and descriptions", async () => {
 		const metadata = await getMetaData();
@@ -22,7 +29,7 @@ describe("nova > the command loader", () => {
 	});
 
 	it("resolves a command class only when asked for one", async () => {
-		const [metadata] = await getMetaData();
+		const metadata = defined((await getMetaData())[0]);
 		const command = await getCommand(metadata);
 
 		expect(command).not.toBeNull();

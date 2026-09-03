@@ -25,7 +25,6 @@ function defined<T>(value: T | null | undefined): T {
 	return value;
 }
 
-
 const SUB_A: PushSubscription = {
 	endpoint: "https://fcm.googleapis.com/wp/AAA111",
 	expirationTime: null,
@@ -340,12 +339,13 @@ describe("FakeNova — deep clone of payload.data", () => {
 			welcomePayload({ data: { tags: ["a", "b"] } }),
 		);
 		const first = fake.getPushed();
-		(defined(first[0]).payload.data as { tags: string[] }).tags.push("tampered");
+		(defined(first[0]).payload.data as { tags: string[] }).tags.push(
+			"tampered",
+		);
 		const second = fake.getPushed();
-		expect((defined(second[0]).payload.data as { tags: string[] }).tags).toEqual([
-			"a",
-			"b",
-		]);
+		expect(
+			(defined(second[0]).payload.data as { tags: string[] }).tags,
+		).toEqual(["a", "b"]);
 	});
 
 	it("nested Date objects in payload.data are cloned (not shared)", async () => {
@@ -356,7 +356,8 @@ describe("FakeNova — deep clone of payload.data", () => {
 			welcomePayload({ data: { when: original as unknown as string } }),
 		);
 		const snapshot = fake.getPushed();
-		const snappedDate = (defined(snapshot[0]).payload.data as { when: Date }).when;
+		const snappedDate = (defined(snapshot[0]).payload.data as { when: Date })
+			.when;
 		expect(snappedDate.getTime()).toBe(original.getTime());
 		// structuredClone produces a NEW Date instance
 		expect(snappedDate).not.toBe(original);

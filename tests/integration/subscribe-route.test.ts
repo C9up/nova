@@ -10,9 +10,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import NovaProvider, {
-	type NovaAppContext,
-} from "../../src/NovaProvider.js";
+import NovaProvider, { type NovaAppContext } from "../../src/NovaProvider.js";
 import {
 	MemorySubscriptionDriver,
 	type PushSubscription,

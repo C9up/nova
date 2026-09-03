@@ -15,7 +15,6 @@ function defined<T>(value: T | null | undefined): T {
 	return value;
 }
 
-
 describe("nova > the command loader", () => {
 	it("lists the commands with their names and descriptions", async () => {
 		const metadata = await getMetaData();

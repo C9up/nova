@@ -24,7 +24,6 @@ function defined<T>(value: T | null | undefined): T {
 	return value;
 }
 
-
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATION_PATH = path.resolve(
 	HERE,

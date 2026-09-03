@@ -201,25 +201,31 @@ describe("Nova > push() — error mapping", () => {
 		});
 	});
 
-	it.each([
-		400, 401, 403,
-	])("maps %i to rejected without cleanup", async (status) => {
-		sendNotificationSpy.mockRejectedValue(webPushError(status));
-		const { nova } = makeNova();
-		const result = await nova.push(SUB_A, PAYLOAD);
-		expect(result).toMatchObject({ ok: false, status, reason: "rejected" });
-		expect(consoleWarnSpy).toHaveBeenCalled();
-	});
+	it.each([400, 401, 403])(
+		"maps %i to rejected without cleanup",
+		async (status) => {
+			sendNotificationSpy.mockRejectedValue(webPushError(status));
+			const { nova } = makeNova();
+			const result = await nova.push(SUB_A, PAYLOAD);
+			expect(result).toMatchObject({ ok: false, status, reason: "rejected" });
+			expect(consoleWarnSpy).toHaveBeenCalled();
+		},
+	);
 
-	it.each([
-		500, 502, 503,
-	])("maps %i to server-error without cleanup", async (status) => {
-		sendNotificationSpy.mockRejectedValue(webPushError(status));
-		const { nova } = makeNova();
-		const result = await nova.push(SUB_A, PAYLOAD);
-		expect(result).toMatchObject({ ok: false, status, reason: "server-error" });
-		expect(consoleErrorSpy).toHaveBeenCalled();
-	});
+	it.each([500, 502, 503])(
+		"maps %i to server-error without cleanup",
+		async (status) => {
+			sendNotificationSpy.mockRejectedValue(webPushError(status));
+			const { nova } = makeNova();
+			const result = await nova.push(SUB_A, PAYLOAD);
+			expect(result).toMatchObject({
+				ok: false,
+				status,
+				reason: "server-error",
+			});
+			expect(consoleErrorSpy).toHaveBeenCalled();
+		},
+	);
 
 	it("maps unknown status to server-error", async () => {
 		sendNotificationSpy.mockRejectedValue(webPushError(999));

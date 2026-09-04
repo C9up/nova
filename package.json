@@ -49,6 +49,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@c9up/atlas": "^0.3.0",
     "@biomejs/biome": "^2.4.10",
     "@types/node": "*",
     "@types/web-push": "^3.6.4",

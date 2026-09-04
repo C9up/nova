@@ -19,6 +19,7 @@
  *   })
  */
 
+import { subscriptionProblem } from "./_internal/subscription.js";
 import { NovaError } from "./errors.js";
 import type {
 	PushSubscription,
@@ -121,6 +122,25 @@ export class SqlSubscriptionStore implements SubscriptionStore {
 	 * Postgres, which will not coerce one on assignment.
 	 */
 	async save(userId: string, subscription: PushSubscription): Promise<void> {
+		// The same rules the subscribe endpoint applies, so a row this store
+		// writes is always one `listByUser` can hand the push layer. A column
+		// type checks a length, not what a P-256 point looks like.
+		const problem = subscriptionProblem({
+			endpoint: subscription.endpoint,
+			expirationTime: subscription.expirationTime,
+			p256dh: subscription.keys.p256dh,
+			auth: subscription.keys.auth,
+		});
+		if (problem !== null) {
+			throw new NovaError(
+				"E_NOVA_INVALID_SUBSCRIPTION",
+				`This subscription cannot be stored: ${problem}.`,
+				{
+					hint: "Subscriptions arriving through the subscribe endpoint are already checked; a hand-built one has to hold the same values a browser sends.",
+				},
+			);
+		}
+
 		await this.delete(subscription.endpoint);
 		const db = await this.#db();
 		const values = [1, 2, 3, 4, 5]

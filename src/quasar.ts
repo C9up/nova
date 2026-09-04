@@ -44,6 +44,11 @@ function missingCommands(value: unknown): string[] {
 	);
 }
 
+/** The same check, as the guard that lets the connection be returned. */
+function isRedisClient(value: unknown): value is SubscriptionRedisClient {
+	return missingCommands(value).length === 0;
+}
+
 /** Resolve the named quasar connection, or say precisely what is missing. */
 export async function quasarConnection(
 	name?: string,
@@ -51,11 +56,9 @@ export async function quasarConnection(
 	// Built at runtime: a static import would put quasar in nova's build graph,
 	// and it is optional.
 	const specifier = "@c9up/quasar/services/main";
-	let module: { default?: unknown };
+	let imported: unknown;
 	try {
-		module = (await import(/* @vite-ignore */ specifier)) as {
-			default?: unknown;
-		};
+		imported = await import(/* @vite-ignore */ specifier);
 	} catch (cause) {
 		throw new NovaError(
 			"E_NOVA_QUASAR_MISSING",
@@ -67,7 +70,10 @@ export async function quasarConnection(
 		);
 	}
 
-	const manager = module.default;
+	const manager =
+		typeof imported === "object" && imported !== null && "default" in imported
+			? imported.default
+			: undefined;
 	if (!isConnectionSource(manager)) {
 		throw new NovaError(
 			"E_NOVA_QUASAR_MISSING",
@@ -76,12 +82,11 @@ export async function quasarConnection(
 	}
 
 	const connection = manager.connection(name);
-	const missing = missingCommands(connection);
-	if (missing.length > 0) {
+	if (!isRedisClient(connection)) {
 		throw new NovaError(
 			"E_NOVA_REDIS_INCOMPLETE",
-			`The quasar connection${name ? ` '${name}'` : ""} is missing ${missing.join(", ")}, which the subscription store issues.`,
+			`The quasar connection${name ? ` '${name}'` : ""} is missing ${missingCommands(connection).join(", ")}, which the subscription store issues.`,
 		);
 	}
-	return connection as SubscriptionRedisClient;
+	return connection;
 }

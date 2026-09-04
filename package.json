@@ -44,7 +44,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
-    "lint": "biome check src/",
+    "lint": "biome check src/ tests/",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit"
   },
@@ -52,6 +52,7 @@
     "@biomejs/biome": "^2.4.10",
     "@types/node": "*",
     "@types/web-push": "^3.6.4",
+    "@vitest/coverage-v8": "^4.1.2",
     "jsdom": "^30.0.1",
     "nock": "^14.0.14",
     "typescript": "^6.0.2",
@@ -114,5 +115,12 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/C9up/nova.git"
+  },
+  "pnpm": {
+    "//": "Pin the coverage toolchain to the version used in dev. Without a committed lockfile the standalone CI resolves fresh, and v8 branch-counting differs enough between releases to cross a threshold on its own. Overrides only apply when this package is the install root (CI), so the monorepo workspace is unaffected.",
+    "overrides": {
+      "@vitest/coverage-v8": "4.1.11",
+      "vitest": "4.1.11"
+    }
   }
 }

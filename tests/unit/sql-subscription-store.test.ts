@@ -2,10 +2,10 @@ import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	NovaError,
-	type PushSubscription,
 	SqlSubscriptionStore,
 	type SubscriptionDatabase,
 } from "../../src/index.js";
+import { subscription } from "../__helpers__/subscription.js";
 
 /**
  * The durable store, against a real SQL engine.
@@ -48,17 +48,6 @@ function sqliteConnection(): SubscriptionDatabase & { close(): void } {
 	};
 }
 
-function subscription(
-	endpoint: string,
-	expirationTime: number | null = null,
-): PushSubscription {
-	return {
-		endpoint,
-		expirationTime,
-		keys: { p256dh: `p256dh-${endpoint}`, auth: `auth-${endpoint}` },
-	};
-}
-
 describe("nova > SqlSubscriptionStore", () => {
 	let db: SubscriptionDatabase & { close(): void };
 	let store: SqlSubscriptionStore;
@@ -69,20 +58,11 @@ describe("nova > SqlSubscriptionStore", () => {
 	});
 
 	it("stores a subscription and reads it back whole", async () => {
-		await store.save(
-			"user-A",
-			subscription("https://push.example/one", 1893456000000),
-		);
+		const sent = subscription("https://push.example/one", 1893456000000);
+		await store.save("user-A", sent);
 
 		const [found] = await store.listByUser("user-A");
-		expect(found).toEqual({
-			endpoint: "https://push.example/one",
-			expirationTime: 1893456000000,
-			keys: {
-				p256dh: "p256dh-https://push.example/one",
-				auth: "auth-https://push.example/one",
-			},
-		});
+		expect(found).toEqual(sent);
 	});
 
 	it("keeps a null expiry null, rather than turning it into 0", async () => {
@@ -227,5 +207,28 @@ describe("nova > SqlSubscriptionStore with an Atlas-shaped connection", () => {
 		// Resolved on first use, then kept: a config file cannot await a
 		// connection that does not exist yet.
 		expect(resolvedTimes).toBe(1);
+	});
+});
+
+describe("nova > SqlSubscriptionStore > what it will store", () => {
+	it("refuses a subscription the push layer could not use", async () => {
+		const db = sqliteConnection();
+		const store = new SqlSubscriptionStore(db);
+
+		// A column type checks a length, not what a P-256 point looks like — so
+		// without this the row goes in and the failure surfaces at push time,
+		// naming neither the row nor the endpoint.
+		await expect(
+			store.save("user-A", {
+				endpoint: "https://push.example/one",
+				expirationTime: null,
+				keys: { p256dh: "too-short", auth: "also-too-short" },
+			}),
+		).rejects.toMatchObject({ code: "E_NOVA_INVALID_SUBSCRIPTION" });
+
+		expect(await db.query("SELECT endpoint FROM push_subscriptions")).toEqual(
+			[],
+		);
+		db.close();
 	});
 });

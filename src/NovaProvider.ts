@@ -18,7 +18,10 @@
 import type { NovaConfig } from "./config.js";
 import { NovaError } from "./errors.js";
 import { Nova } from "./Nova.js";
-import { SubscribeController } from "./SubscribeController.js";
+import {
+	type SubscribeContext,
+	SubscribeController,
+} from "./SubscribeController.js";
 import {
 	MemorySubscriptionDriver,
 	type SubscriptionStore,
@@ -50,7 +53,16 @@ interface RouteBuilderLike {
 }
 
 interface RouterLike {
-	post(path: string, handler: (ctx: unknown) => unknown): RouteBuilderLike;
+	/**
+	 * The handler is declared against the slice of the context it reads, not
+	 * against `unknown`. Written the other way the handler had to assert its own
+	 * argument back into shape — a claim about the framework's context made
+	 * inside the one place that cannot check it.
+	 */
+	post(
+		path: string,
+		handler: (ctx: SubscribeContext) => unknown,
+	): RouteBuilderLike;
 }
 
 export interface NovaAppContext {
@@ -119,6 +131,20 @@ export default class NovaProvider {
 	 */
 	#resolveConfiguredStore(): SubscriptionStore | undefined {
 		const { default: name, stores, store } = this.#config;
+		// A `default` with no `stores` to pick from is the same mistake as a
+		// `default` naming an entry that is not there, and it used to land in
+		// the opposite place: `stores` undefined skipped the check below, and a
+		// deployment that asked for `sql` booted on the in-memory driver — the
+		// exact silent fallback this refuses one branch further down.
+		if (!stores && store === undefined && name !== undefined && name !== "") {
+			throw new NovaError(
+				"E_NOVA_UNKNOWN_STORE",
+				`config.nova names the store '${name}', but declares no \`stores\` to pick it from.`,
+				{
+					hint: "Declare it with stores.memory(), stores.file(), stores.sql() or stores.redis(), or pass a ready-made `store` instead.",
+				},
+			);
+		}
 		if (stores && name !== undefined) {
 			const selected = stores[name];
 			if (!selected) {
@@ -159,8 +185,8 @@ export default class NovaProvider {
 		);
 		const controller = new SubscribeController(store);
 
-		const route = router.post(path, async (ctx: unknown) => {
-			await controller.handle(ctx as Parameters<typeof controller.handle>[0]);
+		const route = router.post(path, async (ctx: SubscribeContext) => {
+			await controller.handle(ctx);
 		});
 
 		const guard = this.#config.guard === undefined ? "jwt" : this.#config.guard;

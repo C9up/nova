@@ -22,7 +22,7 @@ import type {
  * compiles in isolation while keeping the runtime peer intact. Same pattern
  * as NovaProvider's `ContainerLike` / `RouterLike`.
  */
-interface HttpContextLike {
+export interface SubscribeContext {
 	request: { body(): unknown };
 	response: { status(code: number): { json(data: unknown): void } };
 	auth?: { user?: { id?: string } };
@@ -35,7 +35,7 @@ export class SubscribeController {
 		this.#store = store;
 	}
 
-	async handle(ctx: HttpContextLike): Promise<void> {
+	async handle(ctx: SubscribeContext): Promise<void> {
 		const subscription = parseSubscription(ctx.request.body());
 		if (!subscription) {
 			ctx.response.status(400).json({

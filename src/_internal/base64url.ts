@@ -12,8 +12,8 @@ const URL_TO_STANDARD: Record<string, string> = { "-": "+", _: "/" };
 
 function bytesToBase64(bytes: Uint8Array): string {
 	let binary = "";
-	for (let i = 0; i < bytes.length; i++) {
-		binary += String.fromCharCode(bytes[i] as number);
+	for (const byte of bytes) {
+		binary += String.fromCharCode(byte);
 	}
 	if (typeof btoa === "function") {
 		return btoa(binary);
@@ -38,8 +38,7 @@ function base64ToBytes(b64: string): Uint8Array {
 export function encodeBase64Url(bytes: Uint8Array): string {
 	const standard = bytesToBase64(bytes);
 	let out = "";
-	for (let i = 0; i < standard.length; i++) {
-		const ch = standard[i] as string;
+	for (const ch of standard) {
 		if (ch === "=") continue;
 		out += STANDARD_TO_URL[ch] ?? ch;
 	}
@@ -49,8 +48,7 @@ export function encodeBase64Url(bytes: Uint8Array): string {
 /** Decode base64url (with or without padding) to raw bytes. */
 export function decodeBase64Url(input: string): Uint8Array {
 	let standard = "";
-	for (let i = 0; i < input.length; i++) {
-		const ch = input[i] as string;
+	for (const ch of input) {
 		if (ch === "=") continue;
 		standard += URL_TO_STANDARD[ch] ?? ch;
 	}

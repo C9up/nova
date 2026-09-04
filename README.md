@@ -27,6 +27,11 @@ ream nova:vapid:generate            # writes NOVA_VAPID_* into .env
 ream nova:vapid:generate --force    # replaces them — every current subscription stops working
 ```
 
+Whoever can read that private key can send notifications as your application to
+every one of its subscribers, so a `.env` this command creates is created `0600`
+rather than left to the umask. An existing `.env` keeps the permissions the
+deployment gave it; the command says so when they let someone else read it.
+
 Outside a Ream application, mint them in code:
 
 ```ts
@@ -130,7 +135,8 @@ export default defineConfig({
 
 Factories are lazy: only the store actually selected is built, so naming a Redis
 store in a config that runs on the file store opens no connection. A `default`
-that names nothing throws — falling back to memory would look like it worked
+that names nothing throws — one naming a store absent from `stores`, and one
+with no `stores` block at all. Falling back to memory would look like it worked
 until a restart lost every subscription.
 
 | Store | Keeps them | Use it when |
@@ -202,11 +208,21 @@ export interface SubscriptionStore {
 Wrap it in a factory and it is a store like any other:
 `mine: () => new MySubscriptionStore()`.
 
-One rule matters, and all four shipped stores follow it: `save` detaches the
-endpoint from its previous owner. A push endpoint is globally unique per push
-service, so a browser reused across a logout/login pair would otherwise stay
-attached to both accounts — and the next notification for the old one would
-land on the new user's screen.
+Two rules matter, and all four shipped stores follow them.
+
+`save` detaches the endpoint from its previous owner. A push endpoint is
+globally unique per push service, so a browser reused across a logout/login pair
+would otherwise stay attached to both accounts — and the next notification for
+the old one would land on the new user's screen.
+
+And a subscription is checked against the same rules on the way in and on the
+way out: an `https` endpoint within the 768-character storage cap, an
+`expirationTime` that is `null` or a number, and `p256dh` / `auth` that are
+base64url of the lengths a browser produces. A store never writes a record it
+would refuse to read, and never hands the push layer one that fails at
+encryption time — where the message names neither the record nor the endpoint,
+and nothing cleans it up, because cleanup runs on a 404 or a 410 from the push
+service and that request was never made.
 
 ## Testing
 

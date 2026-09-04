@@ -14,6 +14,26 @@ interface SubscriptionStub {
 	toJSON(): Record<string, unknown>;
 }
 
+/**
+ * The headers `subscribe()` sent, read out of the spy without asserting the
+ * shape of a call that may not have happened. Optional chaining into a cast
+ * says "no call" and "no headers" the same way — as a TypeError three lines
+ * later, naming neither.
+ */
+function sentHeaders(spy: ReturnType<typeof vi.fn>): Headers {
+	const call = spy.mock.calls[0];
+	if (!call) throw new Error("fetch was never called");
+	const init: unknown = call[1];
+	if (typeof init !== "object" || init === null || !("headers" in init)) {
+		throw new Error("fetch was called without an init object");
+	}
+	const { headers } = init;
+	if (!(headers instanceof Headers)) {
+		throw new Error("the request carried no Headers");
+	}
+	return headers;
+}
+
 function installNavigatorMocks(opts: {
 	subscription: SubscriptionStub;
 	registerSpy?: ReturnType<typeof vi.fn>;
@@ -137,8 +157,7 @@ describe("nova > client > subscribe", () => {
 		vi.stubGlobal("fetch", fetchSpy);
 
 		await subscribe(VAPID_KEY, { accessToken: "abc.def.ghi" });
-		const headers = (fetchSpy.mock.calls[0]?.[1] as RequestInit)
-			.headers as Headers;
+		const headers = sentHeaders(fetchSpy);
 		expect(headers.get("authorization")).toBe("Bearer abc.def.ghi");
 		expect(headers.get("content-type")).toBe("application/json");
 	});
@@ -158,8 +177,7 @@ describe("nova > client > subscribe", () => {
 				"x-tenant-id": "t-42",
 			},
 		});
-		const headers = (fetchSpy.mock.calls[0]?.[1] as RequestInit)
-			.headers as Headers;
+		const headers = sentHeaders(fetchSpy);
 		expect(headers.get("authorization")).toBe("Bearer explicit-token");
 		expect(headers.get("x-tenant-id")).toBe("t-42");
 	});
@@ -173,8 +191,7 @@ describe("nova > client > subscribe", () => {
 		vi.stubGlobal("fetch", fetchSpy);
 
 		await subscribe(VAPID_KEY);
-		const headers = (fetchSpy.mock.calls[0]?.[1] as RequestInit)
-			.headers as Headers;
+		const headers = sentHeaders(fetchSpy);
 		expect(headers.has("authorization")).toBe(false);
 	});
 

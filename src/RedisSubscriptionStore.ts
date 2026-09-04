@@ -26,6 +26,10 @@
  * a persistent Redis or {@link SqlSubscriptionStore}.
  */
 
+import {
+	isSubscriptionFields,
+	subscriptionProblem,
+} from "./_internal/subscription.js";
 import { NovaError } from "./errors.js";
 import type {
 	PushSubscription,
@@ -115,8 +119,27 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 	 * Same rule as the other two drivers.
 	 */
 	async save(userId: string, subscription: PushSubscription): Promise<void> {
-		const key = this.#subscriptionKey(subscription.endpoint);
-		const previous = await this.#read(key);
+		// Checked on the way in as well as on the way out, so the strictness of
+		// #read can only ever be triggered by a hand-written key — never by this
+		// store writing a record it will later refuse to read, which would drop
+		// the subscription silently on the next listing.
+		const problem = subscriptionProblem({
+			endpoint: subscription.endpoint,
+			expirationTime: subscription.expirationTime,
+			p256dh: subscription.keys.p256dh,
+			auth: subscription.keys.auth,
+		});
+		if (problem !== null) {
+			throw new NovaError(
+				"E_NOVA_INVALID_SUBSCRIPTION",
+				`This subscription cannot be stored: ${problem}.`,
+				{
+					hint: "Subscriptions arriving through the subscribe endpoint are already checked; a hand-built one has to hold the same values a browser sends.",
+				},
+			);
+		}
+
+		const previous = await this.#read(subscription.endpoint);
 		if (previous && previous.userId !== userId) {
 			await (await this.#redis()).srem(
 				this.#userKey(previous.userId),
@@ -124,6 +147,7 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 			);
 		}
 
+		const key = this.#subscriptionKey(subscription.endpoint);
 		const stored: StoredSubscription = {
 			userId,
 			expirationTime: subscription.expirationTime,
@@ -152,7 +176,7 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 		const dangling: string[] = [];
 
 		for (const endpoint of endpoints) {
-			const stored = await this.#read(this.#subscriptionKey(endpoint));
+			const stored = await this.#read(endpoint);
 			if (!stored || stored.userId !== userId) {
 				dangling.push(endpoint);
 				continue;
@@ -173,7 +197,7 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 	/** Forget one subscription, whoever owns it. */
 	async delete(endpoint: string): Promise<void> {
 		const key = this.#subscriptionKey(endpoint);
-		const stored = await this.#read(key);
+		const stored = await this.#read(endpoint);
 		if (stored) {
 			await (await this.#redis()).srem(this.#userKey(stored.userId), endpoint);
 		}
@@ -181,32 +205,63 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 	}
 
 	/**
-	 * Read a stored record, treating unreadable JSON as absent.
+	 * Read a stored record, treating an unusable one as absent.
 	 *
 	 * Throwing here would make one corrupted key break `listByUser` for the
 	 * whole account; absent means the endpoint is pruned from the set instead,
 	 * and the browser re-subscribes on its next visit.
 	 */
-	async #read(key: string): Promise<StoredSubscription | undefined> {
-		const raw = await (await this.#redis()).get(key);
+	async #read(endpoint: string): Promise<StoredSubscription | undefined> {
+		const raw = await (await this.#redis()).get(
+			this.#subscriptionKey(endpoint),
+		);
 		if (raw === null) return undefined;
+		let parsed: unknown;
 		try {
-			const parsed: unknown = JSON.parse(raw);
-			return isStored(parsed) ? parsed : undefined;
+			parsed = JSON.parse(raw);
 		} catch {
 			return undefined;
 		}
+		return readRecord(endpoint, parsed);
 	}
 }
 
-function isStored(value: unknown): value is StoredSubscription {
-	if (typeof value !== "object" || value === null) return false;
-	return (
-		"userId" in value &&
-		typeof value.userId === "string" &&
-		"p256dh" in value &&
-		typeof value.p256dh === "string" &&
-		"auth" in value &&
-		typeof value.auth === "string"
-	);
+/**
+ * One stored record, or undefined when it is not usable.
+ *
+ * The rules are the ones the subscribe endpoint applies to an arriving
+ * subscription, the same way the file store applies them to a record it reads
+ * back. Checking only that three fields were strings let a truncated `p256dh`
+ * — or a record with no `expirationTime` at all, which the return type says
+ * cannot happen — reach the push layer, where it fails as an encryption error
+ * naming neither the key nor the endpoint, and nothing ever cleans it up:
+ * cleanup runs on a 404/410 from the push service, and that request was never
+ * made.
+ */
+function readRecord(
+	endpoint: string,
+	value: unknown,
+): StoredSubscription | undefined {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return undefined;
+	}
+	if (!("userId" in value) || typeof value.userId !== "string") {
+		return undefined;
+	}
+	const fields = {
+		endpoint,
+		expirationTime:
+			"expirationTime" in value ? value.expirationTime : undefined,
+		p256dh: "p256dh" in value ? value.p256dh : undefined,
+		auth: "auth" in value ? value.auth : undefined,
+	};
+	if (!isSubscriptionFields(fields)) return undefined;
+	// The guard narrows the fields, so the record is rebuilt from checked values
+	// rather than asserted into shape.
+	return {
+		userId: value.userId,
+		expirationTime: fields.expirationTime,
+		p256dh: fields.p256dh,
+		auth: fields.auth,
+	};
 }

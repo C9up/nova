@@ -36,6 +36,10 @@ jobs:
           node-version: '22'
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm exec tsc -p tsconfig.build.json --noEmit
+      # The build project excludes `tests`, so a type error in a test file
+      # reached nothing that runs here. `typecheck` is the project that
+      # includes them.
+      - run: pnpm typecheck
       - run: pnpm lint
   # nova is a pure-TS leaf: zero @c9up runtime deps, builds and tests
   # standalone (no native crate, no cross-compile matrix, no sibling
@@ -56,7 +60,9 @@ jobs:
       - name: Build (tsc)
         run: pnpm build
       - name: Vitest
-        run: pnpm exec vitest run
+        # With coverage, because the thresholds in vitest.config.ts are only a
+        # gate if something runs them.
+        run: pnpm test:coverage
 
   # Publish job — gated on workflow_dispatch (manual maintainer trigger) AND
   # a green build-and-test. Requires NPM_TOKEN secret + a v<MAJOR>.<MINOR>.<PATCH>

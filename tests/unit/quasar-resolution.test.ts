@@ -6,7 +6,7 @@
  * be a Redis key says so at construction rather than producing keys nobody can
  * look up.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { quasarConnection } from "../../src/quasar.js";
 import { RedisSubscriptionStore } from "../../src/RedisSubscriptionStore.js";
 
@@ -21,6 +21,58 @@ const CLIENT = {
 };
 
 describe("nova > resolving a quasar connection", () => {
+	afterEach(() => {
+		vi.doUnmock("@c9up/quasar/services/main");
+		vi.resetModules();
+	});
+
+	/**
+	 * Stand in for quasar's service accessor, which is what the specifier
+	 * resolves to. The module is imported by a name built at runtime, so this
+	 * is the seam: nothing here may import quasar statically.
+	 */
+	function withQuasar(connection: unknown): void {
+		vi.doMock("@c9up/quasar/services/main", () => ({
+			default: { connection: () => connection },
+		}));
+		vi.resetModules();
+	}
+
+	/** The module under test, re-imported so the mock above is the one it sees. */
+	async function resolve(name?: string): Promise<unknown> {
+		const { quasarConnection: fresh } = await import("../../src/quasar.js");
+		return fresh(name);
+	}
+
+	it("hands back the named connection when it can serve the store", async () => {
+		withQuasar(CLIENT);
+
+		// The path a deployment actually takes — `stores.redis({ connection:
+		// 'main' })` — and the one nothing reached: every case below this used
+		// to be the only one exercised.
+		await expect(resolve("main")).resolves.toBe(CLIENT);
+	});
+
+	it("names the commands a connection is missing rather than failing on the first subscribe", async () => {
+		const { smembers: _dropped, ...partial } = CLIENT;
+		withQuasar(partial);
+
+		await expect(resolve("main")).rejects.toMatchObject({
+			code: "E_NOVA_REDIS_INCOMPLETE",
+			message: /smembers/,
+		});
+	});
+
+	it("says so when what the specifier answers with is not a connection source", async () => {
+		vi.doMock("@c9up/quasar/services/main", () => ({ default: {} }));
+		vi.resetModules();
+
+		await expect(resolve()).rejects.toMatchObject({
+			code: "E_NOVA_QUASAR_MISSING",
+			message: /connection\(name\)/,
+		});
+	});
+
 	it("refuses when the connection cannot be produced, naming the cause", async () => {
 		// Either quasar is absent — and the message says to install it — or it is
 		// present but no application has booted it, and its own message comes

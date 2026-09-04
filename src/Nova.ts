@@ -233,9 +233,8 @@ export class Nova {
 
 function isWebPushError(value: unknown): value is WebPushErrorLike {
 	if (typeof value !== "object" || value === null) return false;
-	const candidate = value as { name?: unknown; statusCode?: unknown };
-	const looksLikeWebPushByName = candidate.name === "WebPushError";
-	const hasNumericStatus = typeof candidate.statusCode === "number";
+	const looksLikeWebPushByName = Reflect.get(value, "name") === "WebPushError";
+	const hasNumericStatus = typeof Reflect.get(value, "statusCode") === "number";
 	// Both signals MUST agree — a foreign object that happens to carry a numeric
 	// `statusCode` (some HTTP clients) is NOT a WebPushError; conversely, a real
 	// WebPushError without a parsed statusCode (transport-layer failure) gets

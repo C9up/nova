@@ -185,3 +185,29 @@ describe("nova > store selection", () => {
 		);
 	});
 });
+
+describe("nova > store selection > a `default` with nothing to pick from", () => {
+	it("refuses a `default` when no `stores` are declared", () => {
+		// The other branch already refuses a `default` naming an entry that is
+		// not in `stores`, for the reason spelled out there: an application
+		// that meant to persist subscriptions and silently got the in-memory
+		// driver only finds out when a restart has lost them all. With the
+		// `stores` block gone — deleted, or never written — the same mistake
+		// used to land in exactly that place.
+		expect(() => storeFrom({ default: "sql" })).toThrow(/declares no/);
+		try {
+			storeFrom({ default: "sql" });
+		} catch (error) {
+			expect((error as NovaError).code).toBe("E_NOVA_UNKNOWN_STORE");
+		}
+	});
+
+	it("still falls back to memory when nothing is configured at all", () => {
+		expect(storeFrom({})).toBeInstanceOf(MemorySubscriptionDriver);
+	});
+
+	it("still takes a single `store` instance, `default` or not", () => {
+		const store = new MemorySubscriptionDriver();
+		expect(storeFrom({ default: "sql", store })).toBe(store);
+	});
+});

@@ -10,11 +10,8 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-	FileSubscriptionStore,
-	NovaError,
-	type PushSubscription,
-} from "../../src/index.js";
+import { FileSubscriptionStore, NovaError } from "../../src/index.js";
+import { keyOfLength, subscription } from "../__helpers__/subscription.js";
 
 /**
  * The file store, against a real filesystem.
@@ -24,37 +21,6 @@ import {
  * hand. A store that loses subscriptions quietly is worse than one that has
  * none, because nobody finds out until the notifications stop.
  */
-/**
- * A subscription shaped like a browser's.
- *
- * The keys have to be real base64url of the real lengths — an uncompressed
- * P-256 point and a 16-byte secret — because the store now applies the same
- * rules to what it writes as the subscribe endpoint applies to what arrives.
- */
-function keyOfLength(seed: string, length: number): string {
-	const alphabet =
-		"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-	let out = "";
-	for (let index = 0; index < length; index++) {
-		out += alphabet[(seed.charCodeAt(index % seed.length) + index) % 64];
-	}
-	return out;
-}
-
-function subscription(
-	endpoint: string,
-	expirationTime: number | null = null,
-): PushSubscription {
-	return {
-		endpoint,
-		expirationTime,
-		keys: {
-			p256dh: keyOfLength(`p256dh-${endpoint}`, 87),
-			auth: keyOfLength(`auth-${endpoint}`, 22),
-		},
-	};
-}
-
 describe("nova > FileSubscriptionStore", () => {
 	let directory: string;
 	let path: string;

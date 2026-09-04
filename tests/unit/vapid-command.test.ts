@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -88,5 +88,59 @@ describe("nova:vapid:generate", () => {
 		expect(env).not.toContain("old");
 		// Two lines for one variable would leave the file with two answers.
 		expect(env.match(/NOVA_VAPID_PRIVATE_KEY=/g)).toHaveLength(1);
+	});
+
+	/**
+	 * The line this writes is the private key that signs every push the
+	 * application will ever send. Whoever can read it can send notifications as
+	 * the application to every one of its subscribers.
+	 */
+	describe("the file it writes the private key into", () => {
+		it("creates .env readable by nobody but its owner", async () => {
+			const { command, restore } = makeCommand();
+			try {
+				await command.run();
+			} finally {
+				restore();
+			}
+
+			// Left to the umask this is 0644 on a default Debian or Alpine
+			// image, where every other process in the container can read it.
+			const mode = (await stat(join(cwd, ".env"))).mode & 0o777;
+			expect(mode.toString(8)).toBe("600");
+		});
+
+		it("says so instead when an existing .env is readable beyond its owner", async () => {
+			await writeFile(join(cwd, ".env"), "APP_KEY=abc\n");
+			await chmod(join(cwd, ".env"), 0o644);
+
+			const { command, logged, restore } = makeCommand();
+			try {
+				await command.run();
+			} finally {
+				restore();
+			}
+
+			// An existing file's permissions are the deployment's decision, so
+			// they are reported rather than quietly changed — but they are not
+			// passed over in silence either.
+			expect((await stat(join(cwd, ".env"))).mode & 0o777).toBe(0o644);
+			const said = logged.join("\n");
+			expect(said).toContain("err:");
+			expect(said).toContain("644");
+			expect(said).toContain("readable beyond its owner");
+		});
+
+		it("keeps the key it wrote, permissions aside", async () => {
+			const { command, restore } = makeCommand();
+			try {
+				await command.run();
+			} finally {
+				restore();
+			}
+
+			const body = await readFile(join(cwd, ".env"), "utf8");
+			expect(body).toMatch(/^NOVA_VAPID_PRIVATE_KEY=[A-Za-z0-9_-]{43}$/m);
+		});
 	});
 });

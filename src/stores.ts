@@ -68,10 +68,13 @@ export const stores = {
 		connection: SubscriptionRedisResolver | string;
 		prefix?: string;
 	}): SubscriptionStoreFactory {
+		// Bound to a `const` before the closure: a property read does not stay
+		// narrowed inside one, which is what an assertion was papering over.
+		const { connection, prefix } = options;
 		const client: SubscriptionRedisResolver =
-			typeof options.connection === "string"
-				? () => quasarConnection(options.connection as string)
-				: options.connection;
-		return () => new RedisSubscriptionStore(client, { prefix: options.prefix });
+			typeof connection === "string"
+				? () => quasarConnection(connection)
+				: connection;
+		return () => new RedisSubscriptionStore(client, { prefix });
 	},
 };

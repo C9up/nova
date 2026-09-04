@@ -7,13 +7,29 @@
  * refuses to overwrite one without being told to.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { generateVapidKeys } from "../vapid.js";
 import { flag, type NovaCommandClass } from "./contract.js";
 
 const PUBLIC_KEY = "NOVA_VAPID_PUBLIC_KEY";
 const PRIVATE_KEY = "NOVA_VAPID_PRIVATE_KEY";
+
+/**
+ * Owner read/write, nothing for anyone else.
+ *
+ * The line this command adds is the private key that signs every push the
+ * application will ever send; whoever reads it can send notifications as the
+ * application to every one of its subscribers. Left to the umask the file is
+ * created world-readable — 0644 under the default 022 — so on a shared host or
+ * inside a container every other process can read it. The store file already
+ * takes this precaution for a strictly smaller secret.
+ *
+ * Only applied when this command CREATES `.env`: an existing file's permissions
+ * are the deployment's decision, so a permissive one is reported rather than
+ * quietly changed.
+ */
+const OWNER_ONLY = 0o600;
 
 class VapidGenerate {
 	static commandName = "nova:vapid:generate";
@@ -35,8 +51,10 @@ class VapidGenerate {
 	async run(): Promise<void> {
 		const envPath = resolve(process.cwd(), ".env");
 		let existing = "";
+		let existed = false;
 		try {
 			existing = readFileSync(envPath, "utf8");
+			existed = true;
 		} catch {
 			// No .env yet — the file is created below. A project configured
 			// entirely through the shell environment is a legitimate state.
@@ -54,10 +72,11 @@ class VapidGenerate {
 		const pair = generateVapidKeys();
 		let updated = upsertEnvVar(existing, PUBLIC_KEY, pair.publicKey);
 		updated = upsertEnvVar(updated, PRIVATE_KEY, pair.privateKey);
-		writeFileSync(envPath, updated);
+		writeFileSync(envPath, updated, { mode: OWNER_ONLY });
+		if (existed) warnIfReadableByOthers(envPath);
 
 		process.stdout.write(
-			`  create  .env — ${PUBLIC_KEY}, ${PRIVATE_KEY}\n` +
+			`  ${existed ? "update" : "create"}  .env — ${PUBLIC_KEY}, ${PRIVATE_KEY}\n` +
 				`  public  ${pair.publicKey}\n`,
 		);
 	}
@@ -69,6 +88,26 @@ class VapidGenerate {
  * metadata — and this is what checks it at compile time.
  */
 export default VapidGenerate satisfies NovaCommandClass;
+
+/**
+ * Say so when the `.env` this just wrote a private key into can be read by
+ * someone other than its owner. `mode` on `writeFileSync` only applies to a
+ * file it creates, so an existing one keeps whatever it had.
+ */
+function warnIfReadableByOthers(envPath: string): void {
+	let mode: number;
+	try {
+		mode = statSync(envPath).mode & 0o777;
+	} catch {
+		// Unreadable metadata is not worth failing a key generation over.
+		return;
+	}
+	if ((mode & 0o077) === 0) return;
+	process.stderr.write(
+		`  warning  .env is mode ${mode.toString(8).padStart(3, "0")} — ${PRIVATE_KEY} is readable beyond its owner.\n` +
+			"           Whoever reads it can send notifications as this application. Run `chmod 600 .env`.\n",
+	);
+}
 
 /** The value of `name` in a dotenv body, or `undefined`. */
 function readEnvValue(body: string, name: string): string | undefined {

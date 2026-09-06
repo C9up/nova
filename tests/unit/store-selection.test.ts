@@ -211,3 +211,50 @@ describe("nova > store selection > a `default` with nothing to pick from", () =>
 		expect(storeFrom({ default: "sql", store })).toBe(store);
 	});
 });
+
+describe("NovaProvider > shutdown", () => {
+	const configured = (): NovaConfig => ({
+		default: "memory",
+		stores: { memory: stores.memory() },
+	});
+
+	/** An app whose container also answers `router`, which boot() mounts on. */
+	function bootableApp(): NovaAppContext {
+		const { app, bindings } = appWith(configured());
+		bindings.set("router", () => ({
+			post: () => ({ guard: () => undefined }),
+		}));
+		return app;
+	}
+
+	it("releases the services/main singleton it bound", async () => {
+		const { getPush } = await import("../../src/services/main.js");
+		const provider = new NovaProvider(bootableApp());
+		provider.register();
+		await provider.boot();
+		expect(getPush()).toBeDefined();
+
+		await provider.shutdown();
+
+		// A stopped application left a dead push service reachable through
+		// `import push from '@c9up/nova/services/main'`.
+		expect(getPush()).toBeUndefined();
+	});
+
+	it("leaves what another application has since bound alone", async () => {
+		const { getPush } = await import("../../src/services/main.js");
+		const provider = new NovaProvider(bootableApp());
+		provider.register();
+		await provider.boot();
+
+		const other = new NovaProvider(bootableApp());
+		other.register();
+		await other.boot();
+		const replacement = getPush();
+		if (!replacement) throw new Error("expected the second boot to bind one");
+
+		await provider.shutdown();
+
+		expect(getPush()).toBe(replacement);
+	});
+});

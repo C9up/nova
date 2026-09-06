@@ -26,7 +26,7 @@ import {
 	MemorySubscriptionDriver,
 	type SubscriptionStore,
 } from "./SubscriptionStore.js";
-import { setPush } from "./services/main.js";
+import { clearPush, getPush, setPush } from "./services/main.js";
 
 const SUBSCRIPTION_STORE_TOKEN = "SubscriptionStore";
 const NOVA_TOKEN = "nova";
@@ -71,6 +71,9 @@ export interface NovaAppContext {
 }
 
 export default class NovaProvider {
+	/** What this provider bound, so shutdown only clears its own. */
+	#owned: Nova | undefined;
+
 	#app: NovaAppContext;
 	#config: NovaConfig;
 
@@ -173,7 +176,9 @@ export default class NovaProvider {
 	}
 
 	async boot(): Promise<void> {
-		setPush(await this.#app.container.resolve<Nova>(NOVA_TOKEN));
+		const nova = await this.#app.container.resolve<Nova>(NOVA_TOKEN);
+		this.#owned = nova;
+		setPush(nova);
 		const router = await this.#app.container.resolve<RouterLike>("router");
 		const rawPrefix = this.#config.routePrefix;
 		const trimmedPrefix =
@@ -195,5 +200,12 @@ export default class NovaProvider {
 		}
 	}
 
-	async shutdown(): Promise<void> {}
+	async shutdown(): Promise<void> {
+		// Release the module-level singleton, while it is still ours. A stopped
+		// application left a dead push service reachable through `services/main`, and
+		// with two applications in one process the survivor's binding must not
+		// be the one cleared.
+		if (this.#owned !== undefined && getPush() === this.#owned) clearPush();
+		this.#owned = undefined;
+	}
 }

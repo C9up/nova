@@ -1,6 +1,6 @@
 {
   "name": "@c9up/nova",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "Nova \u2014 Web Push notifications for Ream (VAPID + subscription endpoint + service worker scaffolding)",
   "license": "MIT",
   "type": "module",

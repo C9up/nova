@@ -22,6 +22,18 @@ export function getPush(): Nova | undefined {
 	return instance;
 }
 
+/**
+ * @internal Release the singleton, so a shut-down application does not leave a
+ * dead push service reachable through `services/main`.
+ *
+ * The caller checks ownership first (`getPush() === mine`): two applications
+ * share this module in one process, and the one shutting down must not clear
+ * what the other has since bound.
+ */
+export function clearPush(): void {
+	instance = undefined;
+}
+
 const push: Nova = new Proxy({} as Nova, {
 	get(_target, prop) {
 		// A module loader inspects what it imports before anyone uses it: it reads

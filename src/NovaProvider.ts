@@ -4,9 +4,11 @@
  * Lifecycle:
  *   register() — wires the SubscriptionStore singleton (uses
  *                MemorySubscriptionDriver unless `config.nova.store` overrides).
- *   boot()     — resolves the framework Router and registers
+ *   boot()     — publishes the module-level singleton.
+ *   start()    — resolves the framework Router and registers
  *                `POST {routePrefix}/subscribe`, optionally guarded by the
- *                configured strategy.
+ *                configured strategy. In `start`, which is the phase upstream
+ *                documents for routes.
  *   shutdown() — no-op; the in-memory driver is GC'd with the container.
  *
  * The provider is structurally typed against an `AppContext`-compatible

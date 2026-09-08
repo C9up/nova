@@ -176,9 +176,24 @@ export default class NovaProvider {
 	}
 
 	async boot(): Promise<void> {
+		// Publishing the singleton is bookkeeping and belongs here; the route is
+		// not, and moves to `start()`.
 		const nova = await this.#app.container.resolve<Nova>(NOVA_TOKEN);
 		this.#owned = nova;
 		setPush(nova);
+	}
+
+	/**
+	 * Mount the subscription endpoint.
+	 *
+	 * In `start`, which is the phase upstream documents for routes, and the
+	 * order is what makes it matter: providers boot, then providers START, then
+	 * the preloads run — and the preloads are where an application writes its
+	 * own routes. Mounted in `boot`, this landed ahead of every application
+	 * route, so an overlapping path was answered here rather than by the app
+	 * that meant to override it.
+	 */
+	async start(): Promise<void> {
 		const router = await this.#app.container.resolve<RouterLike>("router");
 		const rawPrefix = this.#config.routePrefix;
 		const trimmedPrefix =

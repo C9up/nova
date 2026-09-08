@@ -232,6 +232,7 @@ describe("NovaProvider > shutdown", () => {
 		const provider = new NovaProvider(bootableApp());
 		provider.register();
 		await provider.boot();
+		await provider.start();
 		expect(getPush()).toBeDefined();
 
 		await provider.shutdown();
@@ -246,10 +247,12 @@ describe("NovaProvider > shutdown", () => {
 		const provider = new NovaProvider(bootableApp());
 		provider.register();
 		await provider.boot();
+		await provider.start();
 
 		const other = new NovaProvider(bootableApp());
 		other.register();
 		await other.boot();
+		await other.start();
 		const replacement = getPush();
 		if (!replacement) throw new Error("expected the second boot to bind one");
 

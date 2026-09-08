@@ -127,6 +127,7 @@ describe("nova > subscribe route (integration)", () => {
 		const provider = new NovaProvider(app);
 		provider.register();
 		await provider.boot();
+		await provider.start();
 
 		expect(routes).toHaveLength(1);
 		expect(routes[0]?.path).toBe("/api/nova/subscribe");
@@ -142,6 +143,7 @@ describe("nova > subscribe route (integration)", () => {
 		const provider = new NovaProvider(app);
 		provider.register();
 		await provider.boot();
+		await provider.start();
 
 		expect(routes[0]?.path).toBe("/v2/notifications/subscribe");
 		expect(routes[0]?.guards).toEqual(["session"]);
@@ -153,6 +155,7 @@ describe("nova > subscribe route (integration)", () => {
 		const provider = new NovaProvider(app);
 		provider.register();
 		await provider.boot();
+		await provider.start();
 
 		expect(routes[0]?.guards).toEqual([]);
 	});
@@ -164,6 +167,7 @@ describe("nova > subscribe route (integration)", () => {
 		const provider = new NovaProvider(app);
 		provider.register();
 		await provider.boot();
+		await provider.start();
 
 		const handler = routes[0]?.handler;
 		if (!handler) throw new Error("handler not captured");
@@ -184,6 +188,7 @@ describe("nova > subscribe route (integration)", () => {
 		const provider = new NovaProvider(app);
 		provider.register();
 		await provider.boot();
+		await provider.start();
 
 		const handler = routes[0]?.handler;
 		if (!handler) throw new Error("handler not captured");
@@ -203,6 +208,7 @@ describe("nova > subscribe route (integration)", () => {
 		const provider = new NovaProvider(app);
 		provider.register();
 		await provider.boot();
+		await provider.start();
 
 		const handler = routes[0]?.handler;
 		if (!handler) throw new Error("handler not captured");
@@ -229,6 +235,7 @@ describe("nova > subscribe route (integration)", () => {
 		const provider = new NovaProvider(app);
 		provider.register();
 		await provider.boot();
+		await provider.start();
 
 		const handler = routes[0]?.handler;
 		if (!handler) throw new Error("handler not captured");
@@ -249,6 +256,7 @@ describe("nova > subscribe route (integration)", () => {
 		const provider = new NovaProvider(app);
 		provider.register();
 		await provider.boot();
+		await provider.start();
 
 		const handler = routes[0]?.handler;
 		if (!handler) throw new Error("handler not captured");
@@ -265,6 +273,7 @@ describe("nova > subscribe route (integration)", () => {
 		const provider = new NovaProvider(app);
 		provider.register();
 		await provider.boot();
+		await provider.start();
 
 		const handler = routes[0]?.handler;
 		if (!handler) throw new Error("handler not captured");

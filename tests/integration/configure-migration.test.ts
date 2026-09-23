@@ -38,7 +38,6 @@ const MIGRATION_PATH = path.resolve(
 	"..",
 	"..",
 	"stubs",
-	"nova",
 	"database",
 	"migrations",
 	"0048_create_push_subscriptions.stub",

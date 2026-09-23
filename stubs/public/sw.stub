@@ -1,0 +1,83 @@
+---
+to: public/sw.js
+---
+// Service Worker scaffolded by `ream configure @c9up/nova` (story 48.4).
+//
+// Lifecycle: `skipWaiting` + `clients.claim` so the first push that arrives
+// after subscription is delivered through this SW (not dropped in the
+// install→activate race window).
+//
+// Push handler: parse the JSON payload sent by
+// `nova.push(sub, { title, body, icon, url, tag, data })` and display a
+// notification. `userVisibleOnly: true` (set by @c9up/nova/client
+// `subscribe()`) means we MUST call `showNotification` on every push or
+// the browser revokes the subscription — every parse/error path falls back
+// to a generic notification rather than throwing out of the listener.
+//
+// Notificationclick: close the notification, then focus an existing tab
+// whose URL matches `data.url` (preferring visible/focused tabs), falling
+// back to opening a new window. URL comparison normalises the inbound
+// path against the SW origin.
+//
+// Registered from the app via `registerServiceWorker('/sw.js')` from
+// `@c9up/nova/client`. Edit freely — re-running `ream configure @c9up/nova`
+// will NOT overwrite this file.
+
+self.addEventListener('install', () => self.skipWaiting())
+self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()))
+
+self.addEventListener('push', (event) => {
+  // userVisibleOnly: show a notification on EVERY push — a data-less push must
+  // still surface a generic one, or the browser revokes the subscription.
+  let payload = {}
+  if (event.data) {
+    try {
+      const parsed = event.data.json()
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        payload = parsed
+      }
+    } catch {
+      try {
+        payload = { title: event.data.text() }
+      } catch {
+        payload = {}
+      }
+    }
+  }
+  const { title = 'Notification', body, icon, url, tag, data } = payload
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon,
+      tag,
+      data: { ...(data ?? {}), ...(url !== undefined ? { url } : {}) },
+    }),
+  )
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const target = event.notification.data?.url
+  if (!target) return
+  const targetURL = new URL(target, self.location.origin).href
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: 'window', includeUncontrolled: true })
+      .then((clients) => {
+        const matches = clients
+          .filter((client) => client.url === targetURL)
+          .sort((a, b) => {
+            const aVisible = a.visibilityState === 'visible' ? 0 : 1
+            const bVisible = b.visibilityState === 'visible' ? 0 : 1
+            if (aVisible !== bVisible) return aVisible - bVisible
+            return (b.focused === true ? 1 : 0) - (a.focused === true ? 1 : 0)
+          })
+        if (matches.length > 0) {
+          return matches[0]
+            .focus()
+            .catch(() => self.clients.openWindow(targetURL).catch(() => {}))
+        }
+        return self.clients.openWindow(targetURL).catch(() => {})
+      }),
+  )
+})

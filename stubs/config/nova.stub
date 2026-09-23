@@ -1,0 +1,33 @@
+---
+to: config/nova.ts
+---
+import { defineConfig, stores } from '@c9up/nova'
+import env from '#start/env'
+
+// Mint a VAPID key pair for .env with generateVapidKeys() from '@c9up/nova':
+//   node --input-type=module -e "import {generateVapidKeys} from '@c9up/nova'; console.log(generateVapidKeys())"
+
+export default defineConfig({
+  routePrefix: '/api/nova',
+  guard: 'jwt',
+
+  // Which store keeps the subscriptions. Name it in the environment so a
+  // deployment picks its backend without editing this file.
+  default: env.get('NOVA_STORE', 'memory'),
+  stores: {
+    // Forgets everything on restart — fine for tests and local work.
+    memory: stores.memory(),
+    // One JSON file. Single process; see the nova README.
+    file: stores.file({ path: 'storage/push_subscriptions.json' }),
+    // The push_subscriptions table the migration beside this file creates.
+    // sql: stores.sql({ connection: () => app.container.resolve('db') }),
+    // A @c9up/quasar connection, by name.
+    // redis: stores.redis({ connection: 'main' }),
+  },
+
+  vapid: {
+    publicKey: env.get('NOVA_VAPID_PUBLIC_KEY'),
+    privateKey: env.get('NOVA_VAPID_PRIVATE_KEY'),
+    subject: env.get('NOVA_VAPID_SUBJECT'),
+  },
+})

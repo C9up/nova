@@ -1,6 +1,6 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { access, constants } from "node:fs/promises";
+import { resolve } from "node:path";
+import { stubsRoot } from "./stubs.js";
 
 interface Codemods {
 	addProvider(importPath: string): Promise<void>;
@@ -11,6 +11,12 @@ interface Codemods {
 		content: string,
 		options?: { force?: boolean },
 	): Promise<void>;
+	makeUsingStub(
+		stubsRoot: string,
+		stubPath: string,
+		state?: Record<string, string | number | boolean>,
+		options?: { force?: boolean },
+	): Promise<{ path: string; contents: string }>;
 }
 
 /**
@@ -112,32 +118,21 @@ self.addEventListener('notificationclick', (event) => {
 `;
 
 /**
- * Resolve the path of the migration template shipped at the package root
- * (`packages/nova/migrations/create_push_subscriptions.ts`). Working from
- * `import.meta.url` keeps the resolution stable across the workspace
- * (symlinked) and a published-tarball install (where `src/` and
- * `migrations/` keep their relative layout per the package's `files`
- * include list).
+ * The stub the migration comes from.
+ *
+ * Named here rather than inline so the check below and the call further down
+ * cannot drift apart.
  */
-async function readMigrationTemplate(): Promise<string> {
-	const here = path.dirname(fileURLToPath(import.meta.url));
-	const migrationPath = path.resolve(
-		here,
-		"..",
-		"migrations",
-		"create_push_subscriptions.ts",
-	);
-	return readFile(migrationPath, "utf8");
-}
+const MIGRATION_STUB =
+	"database/migrations/0048_create_push_subscriptions.stub";
 
 export async function configure(codemods: Codemods): Promise<void> {
-	// Read the migration template FIRST — fail-fast before any side effect on
-	// the user's project. If the package's `migrations/` is missing or
-	// unreadable (corrupt install, pruned tarball, EISDIR/EACCES on a weird
-	// volume), abort here so the user is not left with a half-configured
-	// project (provider registered + .env stubbed + config/nova.ts written
-	// but no migration).
-	const migrationContent = await readMigrationTemplate();
+	// Fail-fast BEFORE any side effect on the user's project. If the package's
+	// stub is missing or unreadable (corrupt install, pruned tarball,
+	// EISDIR/EACCES on a weird volume), abort here rather than leave a
+	// half-configured project: provider registered, .env stubbed,
+	// config/nova.ts written — and no migration.
+	await access(resolve(stubsRoot, MIGRATION_STUB), constants.R_OK);
 
 	await codemods.addProvider("@c9up/nova/provider");
 	// The command belongs to the package, so installing the package is all a
@@ -149,40 +144,7 @@ export async function configure(codemods: Codemods): Promise<void> {
 		NOVA_VAPID_PRIVATE_KEY: "",
 		NOVA_VAPID_SUBJECT: "mailto:noreply@localhost",
 	});
-	await codemods.writeFile(
-		"config/nova.ts",
-		`import { defineConfig, stores } from '@c9up/nova'
-import env from '#start/env'
-
-// Mint a VAPID key pair for .env with generateVapidKeys() from '@c9up/nova':
-//   node --input-type=module -e "import {generateVapidKeys} from '@c9up/nova'; console.log(generateVapidKeys())"
-
-export default defineConfig({
-  routePrefix: '/api/nova',
-  guard: 'jwt',
-
-  // Which store keeps the subscriptions. Name it in the environment so a
-  // deployment picks its backend without editing this file.
-  default: env.get('NOVA_STORE', 'memory'),
-  stores: {
-    // Forgets everything on restart — fine for tests and local work.
-    memory: stores.memory(),
-    // One JSON file. Single process; see the nova README.
-    file: stores.file({ path: 'storage/push_subscriptions.json' }),
-    // The push_subscriptions table the migration beside this file creates.
-    // sql: stores.sql({ connection: () => app.container.resolve('db') }),
-    // A @c9up/quasar connection, by name.
-    // redis: stores.redis({ connection: 'main' }),
-  },
-
-  vapid: {
-    publicKey: env.get('NOVA_VAPID_PUBLIC_KEY'),
-    privateKey: env.get('NOVA_VAPID_PRIVATE_KEY'),
-    subject: env.get('NOVA_VAPID_SUBJECT'),
-  },
-})
-`,
-	);
+	await codemods.makeUsingStub(stubsRoot, "config/nova.stub");
 
 	// 48.3 — Atlas durable driver migration template.
 	//
@@ -191,10 +153,7 @@ export default defineConfig({
 	// are safe. The Codemods API does NOT expose a glob/list so the filename
 	// is stable rather than timestamp-prefixed-by-app-convention; users who
 	// prefer their own prefix style can rename the file post-write.
-	await codemods.writeFile(
-		"database/migrations/0048_create_push_subscriptions.ts",
-		migrationContent,
-	);
+	await codemods.makeUsingStub(stubsRoot, MIGRATION_STUB);
 
 	// 48.4 — Service Worker scaffold.
 	//
@@ -202,5 +161,5 @@ export default defineConfig({
 	// is needed; the template cannot fail at runtime. Idempotent on path:
 	// re-running configure preserves user edits to `public/sw.js` (same
 	// contract as `config/nova.ts` and the migration template above).
-	await codemods.writeFile("public/sw.js", SW_TEMPLATE);
+	await codemods.makeUsingStub(stubsRoot, "public/sw.stub");
 }

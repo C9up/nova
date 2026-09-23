@@ -12,8 +12,9 @@
  * the inlined `SW_TEMPLATE`.
  */
 
+import { readFileSync } from "node:fs";
 import { readFile, rename } from "node:fs/promises";
-import path from "node:path";
+import path, { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 import { configure, SW_TEMPLATE } from "../../src/configure.js";
@@ -25,18 +26,49 @@ function defined<T>(value: T | null | undefined): T {
 }
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+/**
+ * The migration comes from a stub now, as every generated file does.
+ *
+ * The fail-fast case below renames THIS aside, so it has to be the file
+ * `configure` actually reads — pointing it at the old `migrations/` copy would
+ * make the test pass while proving nothing.
+ */
 const MIGRATION_PATH = path.resolve(
 	HERE,
 	"..",
 	"..",
+	"stubs",
+	"nova",
+	"database",
 	"migrations",
-	"create_push_subscriptions.ts",
+	"0048_create_push_subscriptions.stub",
 );
 
 interface RecordedWrite {
 	filePath: string;
 	content: string;
 	options?: { force?: boolean };
+}
+
+/**
+ * Read a stub the way `codemods.makeUsingStub` does.
+ *
+ * The real file, not a fixture: a test that stubbed this out would pass with
+ * a stub that does not exist.
+ */
+function renderStub(
+	stubsRoot: string,
+	stubPath: string,
+	state: Record<string, string | number | boolean>,
+): { to: string; body: string } {
+	const raw = readFileSync(resolve(stubsRoot, stubPath), "utf8");
+	const [, front = "", body = ""] = raw.split(/^---\r?\n/m, 3);
+	const declared = /^to:\s*(.+)$/m.exec(front)?.[1]?.trim() ?? "";
+	const render = (text: string): string =>
+		text.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (match, key: string) =>
+			state[key] === undefined ? match : String(state[key]),
+		);
+	return { to: render(declared), body: render(body) };
 }
 
 function makeFakeCodemods() {
@@ -66,6 +98,16 @@ function makeFakeCodemods() {
 			) {
 				writes.push({ filePath, content, options });
 			},
+			async makeUsingStub(
+				stubsRoot: string,
+				stubPath: string,
+				state: Record<string, string | number | boolean> = {},
+				options?: { force?: boolean },
+			) {
+				const { to, body } = renderStub(stubsRoot, stubPath, state);
+				writes.push({ filePath: to, content: body, options });
+				return { path: to, contents: body };
+			},
 		},
 	};
 }
@@ -73,7 +115,9 @@ function makeFakeCodemods() {
 describe("configure hook — codemods writes (config/nova.ts + migration + public/sw.js)", () => {
 	let migrationTemplate: string;
 	beforeAll(async () => {
-		migrationTemplate = await readFile(MIGRATION_PATH, "utf8");
+		// The body, without the front matter that names the destination.
+		const raw = await readFile(MIGRATION_PATH, "utf8");
+		migrationTemplate = raw.split(/^---\r?\n/m, 3)[2] ?? "";
 	});
 
 	it("calls addProvider, addEnvVars, then writeFile thrice (config + migration + sw)", async () => {

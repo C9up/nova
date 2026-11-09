@@ -90,11 +90,20 @@ The endpoint is a URL the browser hands over, so the request is sent through the
 `@c9up/ream/http-client`: it never connects to a private, loopback or link-local address, reads at
 most 16 KiB of the answer and gives up after the deadline.
 
+An endpoint must also belong to a known push service: FCM (`fcm.googleapis.com`), Mozilla
+(`push.services.mozilla.com`), WNS (`notify.windows.com`) or Apple (`push.apple.com`), each with its
+subdomains. The subscribe route answers `400 E_NOVA_INVALID_SUBSCRIPTION` for anything else, and a
+stored row that does not match is not sent to: it comes back as `reason: 'refused'`, `status: 0`.
+
 ```ts
+import { DEFAULT_PUSH_SERVICES, defineConfig } from '@c9up/nova'
+
 export default defineConfig({
   // ...
   delivery: {
     timeout: 10_000,   // ms for one push request, connection to answer (default 10 000)
+    pushServices: [...DEFAULT_PUSH_SERVICES, 'push.example.net'],   // replaces the list
+    allowHosts: ['localhost:4399'],   // development only: a push service on this machine
   },
 })
 ```

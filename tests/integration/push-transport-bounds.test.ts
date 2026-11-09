@@ -145,6 +145,7 @@ describe("nova.push() — response size is bounded", () => {
 			try {
 				const nova = new Nova(new MemorySubscriptionDriver(), VAPID, {
 					http: clientFor(server.url),
+					allowHosts: [new URL(server.url).host],
 				});
 				const result = await nova.push(sub(server.url), { title: "x" });
 
@@ -172,6 +173,7 @@ describe("nova.push() — response size is bounded", () => {
 		try {
 			const nova = new Nova(new MemorySubscriptionDriver(), VAPID, {
 				http: clientFor(server.url),
+				allowHosts: [new URL(server.url).host],
 			});
 			const result = await nova.push(sub(server.url), { title: "x" });
 

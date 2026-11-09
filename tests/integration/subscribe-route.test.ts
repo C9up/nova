@@ -319,3 +319,75 @@ describe("nova > subscribe route (integration)", () => {
 		await provider.shutdown();
 	});
 });
+
+describe("nova > subscribe route — the endpoint must be a push service", () => {
+	async function subscribeWith(
+		endpoint: string,
+		novaConfig?: Record<string, unknown>,
+	): Promise<{ status: number; stored: number }> {
+		const { router, routes } = makeRouter();
+		const store = new MemorySubscriptionDriver();
+		const provider = new NovaProvider(makeApp({ router, store, novaConfig }));
+		provider.register();
+		await provider.start();
+		const handler = routes[0]?.handler;
+		if (!handler) throw new Error("handler not captured");
+		const { ctx, captured } = makeCtx("user-1", { ...VALID_BODY, endpoint });
+		await handler(ctx);
+		return {
+			status: captured.status,
+			stored: (await store.listByUser("user-1")).length,
+		};
+	}
+
+	it.each([
+		"https://169.254.169.254/latest/meta-data/iam/security-credentials/",
+		"https://metadata.google.internal/computeMetadata/v1/",
+		"https://10.0.0.5:8443/admin/delete-all",
+		"https://localhost:6443/api/v1/namespaces",
+		"https://[::1]:9200/_all",
+		"https://127.0.0.1:36501/internal/admin/purge?confirm=yes",
+		"https://0x7f000001/",
+		"https://attacker.example.com/push",
+		"https://fcm.googleapis.com.attacker.example/fcm/send/x",
+		"https://evilfcm.googleapis.com/fcm/send/x",
+		"https://fcm.googleapis.com@attacker.example/fcm/send/x",
+		"https://user:pass@fcm.googleapis.com/fcm/send/x",
+	])("refuses %s with 400 and stores nothing", async (endpoint) => {
+		expect(await subscribeWith(endpoint)).toEqual({ status: 400, stored: 0 });
+	});
+
+	it.each([
+		"https://fcm.googleapis.com/fcm/send/abc123",
+		"https://updates.push.services.mozilla.com/wpush/v2/gAAAA",
+		"https://wns2-par02p.notify.windows.com/w/?token=BQYAAA",
+		"https://web.push.apple.com/QGuQyavXutnMH",
+		"https://FCM.googleapis.com/fcm/send/upper",
+	])("accepts the push service %s", async (endpoint) => {
+		expect(await subscribeWith(endpoint)).toEqual({ status: 201, stored: 1 });
+	});
+
+	it("accepts a push service the application adds", async () => {
+		const endpoint = "https://push.example.net/sub/1";
+		expect(await subscribeWith(endpoint)).toEqual({ status: 400, stored: 0 });
+		expect(
+			await subscribeWith(endpoint, {
+				delivery: { pushServices: ["push.example.net"] },
+			}),
+		).toEqual({ status: 201, stored: 1 });
+	});
+
+	it("accepts a loopback push service only when named in allowHosts", async () => {
+		const endpoint = "https://localhost:4399/push/1";
+		expect(
+			await subscribeWith(endpoint, {
+				delivery: { allowHosts: ["localhost:4399"] },
+			}),
+		).toEqual({ status: 201, stored: 1 });
+		expect(
+			await subscribeWith(endpoint, {
+				delivery: { allowHosts: ["localhost:4400"] },
+			}),
+		).toEqual({ status: 400, stored: 0 });
+	});
+});

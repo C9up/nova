@@ -9,6 +9,12 @@
  * route was registered without a guard (test-only — config sets guard=null).
  */
 
+import {
+	type PushTargetPolicy,
+	pushTargetProblem,
+	type ResolvedPushTargetPolicy,
+	resolvePushTargetPolicy,
+} from "./_internal/push-services.js";
 import { isSubscriptionFields } from "./_internal/subscription.js";
 import { NovaError } from "./errors.js";
 import type {
@@ -30,9 +36,16 @@ export interface SubscribeContext {
 
 export class SubscribeController {
 	#store: SubscriptionStore;
+	readonly #targets: ResolvedPushTargetPolicy;
 
-	constructor(store: SubscriptionStore) {
+	/**
+	 * @param targets The push services an endpoint may point at — the same
+	 * `delivery` options `Nova` sends with, so what is accepted here is what
+	 * can be delivered.
+	 */
+	constructor(store: SubscriptionStore, targets: PushTargetPolicy = {}) {
 		this.#store = store;
+		this.#targets = resolvePushTargetPolicy(targets);
 	}
 
 	async handle(ctx: SubscribeContext): Promise<void> {
@@ -43,6 +56,18 @@ export class SubscribeController {
 					code: "E_NOVA_INVALID_SUBSCRIPTION",
 					message: "Invalid PushSubscription payload",
 					hint: "See https://developer.mozilla.org/docs/Web/API/PushSubscription for the expected shape.",
+				},
+			});
+			return;
+		}
+		// The endpoint decides where the server sends a request on every push;
+		// anything but a push service is refused before it is stored.
+		if (pushTargetProblem(subscription.endpoint, this.#targets) !== null) {
+			ctx.response.status(400).json({
+				error: {
+					code: "E_NOVA_INVALID_SUBSCRIPTION",
+					message:
+						"The endpoint is not a push service this application sends to",
 				},
 			});
 			return;

@@ -1,3 +1,4 @@
+export { DEFAULT_PUSH_SERVICES } from "./_internal/push-services.js";
 export {
 	defineConfig,
 	type NovaConfig,
@@ -13,6 +14,7 @@ export {
 	type PushOptions,
 	type PushPayload,
 	type PushResult,
+	type PushTargetPolicy,
 	type PushUrgency,
 } from "./Nova.js";
 export {

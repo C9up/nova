@@ -24,6 +24,12 @@ import {
 	type PushHttpClient,
 	transportFailure,
 } from "./_internal/http.js";
+import {
+	type PushTargetPolicy,
+	pushTargetProblem,
+	type ResolvedPushTargetPolicy,
+	resolvePushTargetPolicy,
+} from "./_internal/push-services.js";
 import { validateVapidConfig } from "./_internal/vapid-config.js";
 import type { NovaVapidConfig } from "./config.js";
 import type {
@@ -52,6 +58,8 @@ export interface PushOptions {
 }
 
 export type PushFailureReason =
+	/** Not sent: the endpoint is not a push service this app sends to. */
+	| "refused"
 	| "gone"
 	| "rate-limited"
 	| "too-large"
@@ -69,7 +77,7 @@ export type PushResult =
 	  };
 
 /** How push requests leave the server. */
-export interface NovaDeliveryOptions {
+export interface NovaDeliveryOptions extends PushTargetPolicy {
 	/**
 	 * Deadline for one push request — connection, upload and answer — in ms.
 	 * Default 10 000. An endpoint that does not answer in time gets a
@@ -85,6 +93,7 @@ export interface NovaDeliveryOptions {
 }
 
 export type { PushHttpClient } from "./_internal/http.js";
+export type { PushTargetPolicy } from "./_internal/push-services.js";
 
 const DEFAULT_TIMEOUT = 10_000;
 /**
@@ -102,6 +111,7 @@ export class Nova {
 	#rawVapid: NovaVapidConfig | undefined;
 	#validatedVapid: NovaVapidConfig | undefined;
 	readonly #timeout: number;
+	readonly #targets: ResolvedPushTargetPolicy;
 	#http: Promise<PushHttpClient> | undefined;
 
 	constructor(
@@ -112,6 +122,7 @@ export class Nova {
 		this.#store = store;
 		this.#rawVapid = vapidConfig;
 		this.#timeout = resolveTimeout(delivery.timeout);
+		this.#targets = resolvePushTargetPolicy(delivery);
 		if (delivery.http !== undefined) {
 			this.#http = Promise.resolve(delivery.http);
 		}
@@ -140,6 +151,10 @@ export class Nova {
 		if (options.urgency) webpushOptions.urgency = options.urgency;
 		if (topic !== undefined) webpushOptions.topic = topic;
 
+		// Checked again at send time: a row may predate the rule, or the list.
+		const refusal = pushTargetProblem(endpoint, this.#targets);
+		if (refusal !== null) return refused(endpoint, refusal);
+
 		const request = webpush.generateRequestDetails(
 			subscription,
 			JSON.stringify(payload),
@@ -167,6 +182,9 @@ export class Nova {
 		} catch (cause) {
 			const failure = transportFailure(cause);
 			if (failure === undefined) throw cause;
+			if (failure === "privateAddress" || failure === "invalidUrl") {
+				return refused(endpoint, `the client refused it (${failure})`);
+			}
 			console.error(
 				`[nova] push to ${hostOf(endpoint)} failed before an answer (${failure})`,
 			);
@@ -215,7 +233,9 @@ export class Nova {
 
 	#client(): Promise<PushHttpClient> {
 		if (this.#http !== undefined) return this.#http;
-		const loading = defaultHttpClient({});
+		const loading = defaultHttpClient({
+			allowHosts: [...this.#targets.allowHosts],
+		});
 		this.#http = loading;
 		// A failed load is not kept: installing the peer and retrying works.
 		loading.catch(() => {
@@ -297,6 +317,11 @@ export class Nova {
 			cleaned: false,
 		};
 	}
+}
+
+function refused(endpoint: string, why: string): PushResult {
+	console.warn(`[nova] push to ${hostOf(endpoint)} not sent: ${why}`);
+	return { ok: false, status: 0, endpoint, reason: "refused", cleaned: false };
 }
 
 function resolveTimeout(input: number | undefined): number {

@@ -206,7 +206,7 @@ export default class NovaProvider {
 		const store = await this.#app.container.resolve<SubscriptionStore>(
 			SUBSCRIPTION_STORE_TOKEN,
 		);
-		const controller = new SubscribeController(store);
+		const controller = new SubscribeController(store, this.#config.delivery);
 
 		const route = router.post(path, async (ctx: SubscribeContext) => {
 			await controller.handle(ctx);

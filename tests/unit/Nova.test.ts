@@ -473,3 +473,72 @@ describe("Nova > pushToUser per-subscription error isolation (review patch)", ()
 		expect(http.requests).toHaveLength(0);
 	});
 });
+
+describe("Nova > push() — only push services are contacted", () => {
+	it.each([
+		"https://127.0.0.1:36501/internal/admin/purge?confirm=yes",
+		"https://[::1]:9200/_all",
+		"https://attacker.example.com/push",
+		"http://fcm.googleapis.com/fcm/send/x",
+	])("refuses a stored %s without sending anything", async (endpoint) => {
+		answer(201);
+		const { nova, store } = makeNova();
+		const stale = { ...SUB_A, endpoint };
+		await store.save("u1", stale);
+		const result = await nova.push(stale, PAYLOAD);
+		expect(result).toEqual({
+			ok: false,
+			status: 0,
+			endpoint,
+			reason: "refused",
+			cleaned: false,
+		});
+		expect(http.requests).toHaveLength(0);
+		expect(consoleWarnSpy).toHaveBeenCalled();
+	});
+
+	it("maps a client-side address refusal to refused", async () => {
+		http.on(
+			"POST",
+			() => true,
+			() => {
+				throw new HttpClientError("privateAddress", SUB_A.endpoint, "boom");
+			},
+		);
+		const { nova } = makeNova();
+		expect(await nova.push(SUB_A, PAYLOAD)).toMatchObject({
+			ok: false,
+			status: 0,
+			reason: "refused",
+		});
+	});
+
+	it("sends to a push service added in the options", async () => {
+		answer(201);
+		const store = new MemorySubscriptionDriver();
+		const nova = new Nova(store, VALID_VAPID, {
+			http,
+			pushServices: ["push.example.net"],
+		});
+		const endpoint = "https://eu.push.example.net/s/1";
+		expect(await nova.push({ ...SUB_A, endpoint }, PAYLOAD)).toMatchObject({
+			ok: true,
+		});
+		// Replacing the list drops the defaults.
+		expect(await nova.push(SUB_A, PAYLOAD)).toMatchObject({
+			reason: "refused",
+		});
+	});
+
+	it.each(["", ".push.example.net", "*.push.example.net"])(
+		"refuses the pushServices entry %j",
+		(entry) => {
+			expect(
+				() =>
+					new Nova(new MemorySubscriptionDriver(), VALID_VAPID, {
+						pushServices: [entry],
+					}),
+			).toThrow(/pushServices/);
+		},
+	);
+});

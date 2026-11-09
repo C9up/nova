@@ -677,3 +677,22 @@ describe("Nova > push() — Retry-After (RFC 8030 §8.4)", () => {
 		expect(await nova.push(SUB_A, PAYLOAD)).not.toHaveProperty("retryAfter");
 	});
 });
+
+describe("Nova > pushToUser() — user ids", () => {
+	it("looks a numeric id up as its decimal text", async () => {
+		answer(201);
+		const { nova, store } = makeNova();
+		await store.save("42", SUB_A);
+		expect(await nova.pushToUser(42, PAYLOAD)).toHaveLength(1);
+		expect(await nova.pushToUser(42n, PAYLOAD)).toHaveLength(1);
+	});
+
+	it.each([
+		["", ""],
+		["NaN", Number.NaN],
+		["1.5", 1.5],
+	])("refuses %s rather than looking up a made-up id", async (_label, id) => {
+		const { nova } = makeNova();
+		await expect(nova.pushToUser(id, PAYLOAD)).rejects.toThrow(/not a user id/);
+	});
+});

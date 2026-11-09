@@ -13,6 +13,7 @@ import { fakeHttp } from "@c9up/ream/http-client";
 import { describe, expect, it } from "vitest";
 import { Nova } from "../../src/Nova.js";
 import NovaProvider, { type NovaAppContext } from "../../src/NovaProvider.js";
+import { SubscribeController } from "../../src/SubscribeController.js";
 import {
 	MemorySubscriptionDriver,
 	type PushSubscription,
@@ -380,5 +381,87 @@ describe("nova > subscribe route — the endpoint must be a push service", () =>
 				delivery: { allowHosts: ["localhost:4400"] },
 			}),
 		).toEqual({ status: 400, stored: 0 });
+	});
+});
+
+describe("nova > subscribe route — user ids", () => {
+	function controllerWith(
+		store: MemorySubscriptionDriver,
+	): SubscribeController {
+		return new SubscribeController(store);
+	}
+
+	function ctxFor(user: { id?: unknown } | undefined) {
+		const captured: StubResponse = { status: 200, body: undefined };
+		const ctx = {
+			request: { body: () => VALID_BODY },
+			response: {
+				status(code: number) {
+					captured.status = code;
+					return {
+						json(payload: unknown) {
+							captured.body = payload;
+						},
+					};
+				},
+			},
+			auth: { user },
+		};
+		return { ctx, captured };
+	}
+
+	it("stores a numeric id (an auto-increment key) as its decimal text", async () => {
+		const store = new MemorySubscriptionDriver();
+		const { ctx, captured } = ctxFor({ id: 42 });
+		await controllerWith(store).handle(ctx);
+		expect(captured.status).toBe(201);
+		expect(await store.listByUser("42")).toHaveLength(1);
+	});
+
+	it("stores a bigint id as its decimal text", async () => {
+		const store = new MemorySubscriptionDriver();
+		const { ctx, captured } = ctxFor({ id: 9007199254740993n });
+		await controllerWith(store).handle(ctx);
+		expect(captured.status).toBe(201);
+		expect(await store.listByUser("9007199254740993")).toHaveLength(1);
+	});
+
+	it("lets pushToUser take the same numeric id", async () => {
+		const http = fakeHttp({ maxRedirects: 0 });
+		http.on("POST", () => true, { status: 201 });
+		const store = new MemorySubscriptionDriver();
+		await controllerWith(store).handle(ctxFor({ id: 42 }).ctx);
+		const nova = new Nova(
+			store,
+			{ ...generateVapidKeys(), subject: "mailto:ops@example.com" },
+			{ http },
+		);
+		const results = await nova.pushToUser(42, { title: "x" });
+		expect(results).toEqual([
+			{ ok: true, status: 201, endpoint: VALID_BODY.endpoint },
+		]);
+	});
+
+	it.each([
+		["an empty string", ""],
+		["NaN", Number.NaN],
+		["Infinity", Number.POSITIVE_INFINITY],
+		["a fraction", 1.5],
+		["an object", { toString: () => "1" }],
+	])("refuses %s as an id, without blaming the guard", async (_label, id) => {
+		const store = new MemorySubscriptionDriver();
+		await expect(
+			controllerWith(store).handle(ctxFor({ id }).ctx),
+		).rejects.toMatchObject({
+			code: "E_NOVA_INVALID_USER_ID",
+		});
+		expect(await store.listByUser(String(id))).toEqual([]);
+	});
+
+	it("still names the guard when there is no user at all", async () => {
+		const store = new MemorySubscriptionDriver();
+		await expect(
+			controllerWith(store).handle(ctxFor(undefined).ctx),
+		).rejects.toMatchObject({ code: "E_NOVA_MISSING_USER" });
 	});
 });

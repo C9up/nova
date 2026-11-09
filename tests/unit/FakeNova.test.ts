@@ -93,6 +93,12 @@ describe("FakeNova — pushToUser() capture", () => {
 		}
 	});
 
+	it("captures a numeric id as the text Nova looks it up by", async () => {
+		const fake = new FakeNova();
+		await fake.pushToUser(42, welcomePayload());
+		fake.assertPushed({ userId: "42" });
+	});
+
 	it("pushToUser() captures both call kinds in order", async () => {
 		const fake = new FakeNova();
 		await fake.push(SUB_A, welcomePayload());

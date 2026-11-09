@@ -85,14 +85,15 @@ export class FakeNova {
 		return { ok: true, status: 201, endpoint: subscription.endpoint };
 	}
 
+	/** Same signature as `Nova.pushToUser`; the id is captured as its text. */
 	async pushToUser(
-		userId: string,
+		userId: string | number | bigint,
 		payload: PushPayload,
 		options: PushOptions = {},
 	): Promise<PushResult[]> {
 		this.#captured.push({
 			kind: "fan-out",
-			userId,
+			userId: String(userId),
 			payload: clonePayload(payload),
 			options: cloneOptions(options),
 			timestamp: Date.now(),

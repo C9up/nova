@@ -16,6 +16,7 @@ import {
 	resolvePushTargetPolicy,
 } from "./_internal/push-services.js";
 import { isSubscriptionFields } from "./_internal/subscription.js";
+import { normaliseUserId } from "./_internal/user-id.js";
 import { NovaError } from "./errors.js";
 import type {
 	PushSubscription,
@@ -31,7 +32,11 @@ import type {
 export interface SubscribeContext {
 	request: { body(): unknown };
 	response: { status(code: number): { json(data: unknown): void } };
-	auth?: { user?: { id?: string } };
+	/**
+	 * `id` as the auth layer hands it: a string, or a number or bigint for an
+	 * auto-increment key. Stored as text either way.
+	 */
+	auth?: { user?: { id?: unknown } };
 }
 
 export class SubscribeController {
@@ -73,11 +78,18 @@ export class SubscribeController {
 			return;
 		}
 
-		const userId = ctx.auth?.user?.id;
-		if (typeof userId !== "string" || userId.length === 0) {
+		const user = ctx.auth?.user;
+		if (user === undefined || user === null) {
 			throw new NovaError(
 				"E_NOVA_MISSING_USER",
 				"Subscription handler reached without an authenticated user. Did you disable the guard?",
+			);
+		}
+		const userId = normaliseUserId(user.id);
+		if (userId === undefined) {
+			throw new NovaError(
+				"E_NOVA_INVALID_USER_ID",
+				"The authenticated user has no usable id: expected a non-empty string or an integer.",
 			);
 		}
 

@@ -1,10 +1,10 @@
-import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	NovaError,
 	SqlSubscriptionStore,
 	type SubscriptionDatabase,
 } from "../../src/index.js";
+import { sqliteConnection } from "../__helpers__/stores.js";
 import { subscription } from "../__helpers__/subscription.js";
 
 /**
@@ -16,37 +16,6 @@ import { subscription } from "../__helpers__/subscription.js";
  * statements — a driver whose SQL is only asserted as a string is a driver
  * nobody has run.
  */
-
-/** The migration's schema, in SQLite terms. */
-const SCHEMA = `
-  CREATE TABLE push_subscriptions (
-    endpoint VARCHAR(768) PRIMARY KEY,
-    user_id VARCHAR(255) NOT NULL,
-    p256dh VARCHAR(100) NOT NULL,
-    auth VARCHAR(50) NOT NULL,
-    expiration_time BIGINT,
-    created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL
-  );
-  CREATE INDEX push_subscriptions_user_id ON push_subscriptions (user_id);
-`;
-
-/** `node:sqlite` behind the three methods the store asks for. */
-function sqliteConnection(): SubscriptionDatabase & { close(): void } {
-	const db = new DatabaseSync(":memory:");
-	db.exec(SCHEMA);
-	return {
-		dialect: "sqlite",
-		async execute(sql, params = []) {
-			const result = db.prepare(sql).run(...(params as never[]));
-			return { rowsAffected: Number(result.changes) };
-		},
-		async query<T>(sql: string, params: unknown[] = []) {
-			return db.prepare(sql).all(...(params as never[])) as T[];
-		},
-		close: () => db.close(),
-	};
-}
 
 describe("nova > SqlSubscriptionStore", () => {
 	let db: SubscriptionDatabase & { close(): void };

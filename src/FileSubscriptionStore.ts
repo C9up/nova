@@ -23,6 +23,7 @@
 
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { assertMayTakeOver } from "./_internal/ownership.js";
 import { subscriptionProblem } from "./_internal/subscription.js";
 import { NovaError } from "./errors.js";
 import type {
@@ -86,11 +87,21 @@ export class FileSubscriptionStore implements SubscriptionStore {
 		}
 
 		await this.#mutate((file) => {
-			// Whoever held this endpoint before loses it: a push endpoint is
-			// globally unique per push service, so a browser reused across a
-			// logout/login pair would otherwise stay attached to both accounts, and
-			// the next notification for the old one would land on the new user's
-			// screen. Writing the record replaces the owner outright.
+			// Whoever held this endpoint before loses it — when the poster holds
+			// the same keys: a push endpoint is globally unique per push service,
+			// so a browser reused across a logout/login pair would otherwise stay
+			// attached to both accounts, and the next notification for the old one
+			// would land on the new user's screen.
+			const current = file.subscriptions[subscription.endpoint];
+			assertMayTakeOver(
+				subscription.endpoint,
+				userId,
+				current && {
+					userId: current.userId,
+					keys: { p256dh: current.p256dh, auth: current.auth },
+				},
+				subscription.keys,
+			);
 			file.subscriptions[subscription.endpoint] = {
 				userId,
 				expirationTime: subscription.expirationTime,

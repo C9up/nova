@@ -19,6 +19,7 @@
  *   })
  */
 
+import { assertMayTakeOver } from "./_internal/ownership.js";
 import { subscriptionProblem } from "./_internal/subscription.js";
 import { NovaError } from "./errors.js";
 import type {
@@ -63,6 +64,13 @@ interface SubscriptionRow {
 	p256dh: string;
 	auth: string;
 	expiration_time: number | string | null;
+}
+
+/** Who holds an endpoint, and with which keys. */
+interface OwnerRow {
+	user_id: string | number;
+	p256dh: string;
+	auth: string;
 }
 
 // The table name reaches the SQL as an identifier, where a parameter cannot go.
@@ -115,7 +123,8 @@ export class SqlSubscriptionStore implements SubscriptionStore {
 	 * endpoint is globally unique per push service, so a browser reused across a
 	 * logout/login pair would otherwise stay attached to BOTH accounts — and the
 	 * next notification for the old one would land on the new user's screen.
-	 * Same rule as the in-memory driver, for the same reason.
+	 * Same rule as the in-memory driver, for the same reason — and, like it,
+	 * granted only to a poster presenting the keys already stored.
 	 *
 	 * `CURRENT_TIMESTAMP` rather than a JavaScript date: it is standard SQL on
 	 * all three dialects, and it keeps a text-bound timestamp away from
@@ -141,8 +150,22 @@ export class SqlSubscriptionStore implements SubscriptionStore {
 			);
 		}
 
-		await this.delete(subscription.endpoint);
 		const db = await this.#db();
+		const [current] = await db.query<OwnerRow>(
+			`SELECT user_id, p256dh, auth FROM ${this.#table} ` +
+				`WHERE endpoint = ${this.#placeholder(db, 1)}`,
+			[subscription.endpoint],
+		);
+		assertMayTakeOver(
+			subscription.endpoint,
+			userId,
+			current && {
+				userId: String(current.user_id),
+				keys: { p256dh: current.p256dh, auth: current.auth },
+			},
+			subscription.keys,
+		);
+		await this.delete(subscription.endpoint);
 		const values = [1, 2, 3, 4, 5]
 			.map((i) => this.#placeholder(db, i))
 			.join(", ");

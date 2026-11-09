@@ -465,3 +465,42 @@ describe("nova > subscribe route — user ids", () => {
 		).rejects.toMatchObject({ code: "E_NOVA_MISSING_USER" });
 	});
 });
+
+describe("nova > subscribe route — an endpoint another user holds", () => {
+	function post(
+		controller: SubscribeController,
+		userId: string,
+		body: PushSubscription,
+	) {
+		const { ctx, captured } = makeCtx(userId, body);
+		return controller.handle(ctx).then(() => captured);
+	}
+
+	it("answers 409 to a poster with other keys and keeps the owner's row", async () => {
+		const store = new MemorySubscriptionDriver();
+		const controller = new SubscribeController(store);
+		expect((await post(controller, "victim", VALID_BODY)).status).toBe(201);
+
+		const answer = await post(controller, "attacker", {
+			...VALID_BODY,
+			keys: { p256dh: realP256dh(), auth: realAuth() },
+		});
+
+		expect(answer.status).toBe(409);
+		expect(answer.body).toMatchObject({
+			error: { code: "E_NOVA_SUBSCRIPTION_CONFLICT" },
+		});
+		expect(await store.listByUser("victim")).toEqual([VALID_BODY]);
+		expect(await store.listByUser("attacker")).toEqual([]);
+	});
+
+	it("moves it to a user posting the same keys (shared device)", async () => {
+		const store = new MemorySubscriptionDriver();
+		const controller = new SubscribeController(store);
+		await post(controller, "first", VALID_BODY);
+
+		expect((await post(controller, "second", VALID_BODY)).status).toBe(201);
+		expect(await store.listByUser("first")).toEqual([]);
+		expect(await store.listByUser("second")).toEqual([VALID_BODY]);
+	});
+});

@@ -93,7 +93,20 @@ export class SubscribeController {
 			);
 		}
 
-		await this.#store.save(userId, subscription);
+		try {
+			await this.#store.save(userId, subscription);
+		} catch (error) {
+			if (
+				error instanceof NovaError &&
+				error.code === "E_NOVA_SUBSCRIPTION_CONFLICT"
+			) {
+				ctx.response.status(409).json({
+					error: { code: error.code, message: error.message },
+				});
+				return;
+			}
+			throw error;
+		}
 		ctx.response
 			.status(201)
 			.json({ ok: true, endpoint: subscription.endpoint });

@@ -11,6 +11,8 @@
  * user owns it; `save()` is upsert-by-endpoint within the user's bucket.
  */
 
+import { assertMayTakeOver } from "./_internal/ownership.js";
+
 export interface PushSubscription {
 	endpoint: string;
 	expirationTime: number | null;
@@ -34,6 +36,12 @@ export class MemorySubscriptionDriver implements SubscriptionStore {
 		// would return stale entries on the old account, and notifications
 		// would fan out to whoever logged in last. Reuse the existing
 		// `delete(endpoint)` sweep so the rule lives in one place.
+		assertMayTakeOver(
+			subscription.endpoint,
+			userId,
+			this.#ownerOf(subscription.endpoint),
+			subscription.keys,
+		);
 		await this.delete(subscription.endpoint);
 
 		let bucket = this.#byUser.get(userId);
@@ -42,6 +50,16 @@ export class MemorySubscriptionDriver implements SubscriptionStore {
 			this.#byUser.set(userId, bucket);
 		}
 		bucket.set(subscription.endpoint, subscription);
+	}
+
+	#ownerOf(
+		endpoint: string,
+	): { userId: string; keys: PushSubscription["keys"] } | undefined {
+		for (const [userId, bucket] of this.#byUser) {
+			const stored = bucket.get(endpoint);
+			if (stored) return { userId, keys: stored.keys };
+		}
+		return undefined;
 	}
 
 	async listByUser(userId: string): Promise<PushSubscription[]> {

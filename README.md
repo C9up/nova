@@ -248,12 +248,16 @@ Two rules matter, and all four shipped stores follow them.
 `save` detaches the endpoint from its previous owner. A push endpoint is
 globally unique per push service, so a browser reused across a logout/login pair
 would otherwise stay attached to both accounts — and the next notification for
-the old one would land on the new user's screen.
+the old one would land on the new user's screen. It does so only when the new
+owner posts the same `p256dh` and `auth` as the stored ones — the browser that
+holds the subscription does; anyone who merely learned the endpoint does not —
+and otherwise throws `E_NOVA_SUBSCRIPTION_CONFLICT`, which the subscribe route
+answers with `409`.
 
 And a subscription is checked against the same rules on the way in and on the
 way out: an `https` endpoint within the 768-character storage cap, an
-`expirationTime` that is `null` or a number, and `p256dh` / `auth` that are
-base64url of the lengths a browser produces. A store never writes a record it
+`expirationTime` that is `null` or a number, a `p256dh` that is a P-256 point
+and an `auth` that is a 16-byte secret, both base64url. A store never writes a record it
 would refuse to read, and never hands the push layer one that fails at
 encryption time — where the message names neither the record nor the endpoint,
 and nothing cleans it up, because cleanup runs on a 404 or a 410 from the push

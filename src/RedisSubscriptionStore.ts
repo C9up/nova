@@ -26,6 +26,7 @@
  * a persistent Redis or {@link SqlSubscriptionStore}.
  */
 
+import { assertMayTakeOver } from "./_internal/ownership.js";
 import {
 	isSubscriptionFields,
 	subscriptionProblem,
@@ -140,6 +141,15 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 		}
 
 		const previous = await this.#read(subscription.endpoint);
+		assertMayTakeOver(
+			subscription.endpoint,
+			userId,
+			previous && {
+				userId: previous.userId,
+				keys: { p256dh: previous.p256dh, auth: previous.auth },
+			},
+			subscription.keys,
+		);
 		if (previous && previous.userId !== userId) {
 			await (await this.#redis()).srem(
 				this.#userKey(previous.userId),

@@ -13,11 +13,7 @@ import type {
 	PushPayload,
 	PushSubscription,
 } from "../../src/index.js";
-import {
-	type CapturedPush,
-	FakeNova,
-	type FakeNovaPredicate,
-} from "../../src/testing/FakeNova.js";
+import { type CapturedPush, FakeNova } from "../../src/testing/FakeNova.js";
 
 /** Narrow away null/undefined without a `!` assertion (which lies to the compiler). */
 function defined<T>(value: T | null | undefined): T {
@@ -119,7 +115,7 @@ describe("FakeNova — defensive snapshot in getPushed()", () => {
 			payload: { title: "x" },
 			options: {},
 			timestamp: 0,
-		} as CapturedPush);
+		});
 		expect(fake.getPushed()).toHaveLength(1);
 	});
 
@@ -128,7 +124,7 @@ describe("FakeNova — defensive snapshot in getPushed()", () => {
 		await fake.push(SUB_A, welcomePayload());
 		const first = fake.getPushed();
 		// Tamper with the returned snapshot
-		(defined(first[0]) as { payload: PushPayload }).payload.title = "Tampered";
+		defined(first[0]).payload.title = "Tampered";
 		const second = fake.getPushed();
 		expect(defined(second[0]).payload.title).toBe("Welcome");
 	});
@@ -224,9 +220,9 @@ describe("FakeNova — assertPushed (object predicate)", () => {
 	it("rejects empty-string `containing` (would match everything)", async () => {
 		const fake = new FakeNova();
 		await fake.pushToUser("user-A", welcomePayload());
-		expect(() =>
-			fake.assertPushed({ containing: "" } as FakeNovaPredicate),
-		).toThrow(/`containing` predicate cannot be an empty string/);
+		expect(() => fake.assertPushed({ containing: "" })).toThrow(
+			/`containing` predicate cannot be an empty string/,
+		);
 	});
 
 	it("all predicate fields are AND-combined", async () => {
@@ -313,7 +309,7 @@ describe("FakeNova — defensive serialisation of `containing` matcher", () => {
 		await fake.pushToUser(
 			"user-A",
 			welcomePayload({
-				data: { tally: 9_007_199_254_740_993n as unknown as number },
+				data: { tally: 9_007_199_254_740_993n },
 			}),
 		);
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -345,13 +341,11 @@ describe("FakeNova — deep clone of payload.data", () => {
 			welcomePayload({ data: { tags: ["a", "b"] } }),
 		);
 		const first = fake.getPushed();
-		(defined(first[0]).payload.data as { tags: string[] }).tags.push(
-			"tampered",
-		);
+		const tags = defined(first[0]).payload.data?.tags;
+		if (!Array.isArray(tags)) throw new Error("the snapshot lost its tags");
+		tags.push("tampered");
 		const second = fake.getPushed();
-		expect(
-			(defined(second[0]).payload.data as { tags: string[] }).tags,
-		).toEqual(["a", "b"]);
+		expect(defined(second[0]).payload.data?.tags).toEqual(["a", "b"]);
 	});
 
 	it("nested Date objects in payload.data are cloned (not shared)", async () => {
@@ -359,11 +353,11 @@ describe("FakeNova — deep clone of payload.data", () => {
 		const original = new Date(1_900_000_000_000);
 		await fake.pushToUser(
 			"user-A",
-			welcomePayload({ data: { when: original as unknown as string } }),
+			welcomePayload({ data: { when: original } }),
 		);
 		const snapshot = fake.getPushed();
-		const snappedDate = (defined(snapshot[0]).payload.data as { when: Date })
-			.when;
+		const snappedDate = defined(snapshot[0]).payload.data?.when;
+		if (!(snappedDate instanceof Date)) throw new Error("not a Date any more");
 		expect(snappedDate.getTime()).toBe(original.getTime());
 		// structuredClone produces a NEW Date instance
 		expect(snappedDate).not.toBe(original);
@@ -373,11 +367,14 @@ describe("FakeNova — deep clone of payload.data", () => {
 describe("FakeNova — defensive cloneSubscription on missing keys", () => {
 	it("does not throw when keys is undefined (legal under permissive types)", async () => {
 		const fake = new FakeNova();
-		const subWithoutKeys = {
+		// What a plain-JS caller can pass: the type says `keys`, the object has none.
+		const subWithoutKeys: PushSubscription = {
 			endpoint: "https://x/y",
 			expirationTime: null,
-			keys: undefined as unknown as { p256dh: string; auth: string },
+			keys: { p256dh: "", auth: "" },
 		};
+		Reflect.deleteProperty(subWithoutKeys, "keys");
+		expect("keys" in subWithoutKeys).toBe(false);
 		await fake.push(subWithoutKeys, welcomePayload());
 		const captured = fake.getPushed();
 		const entry0 = defined(captured[0]);

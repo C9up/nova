@@ -42,7 +42,7 @@ describe("nova.push() — VAPID misconfiguration", () => {
 			await nova.push(SUB, { title: "boom" });
 			throw new Error("should have thrown");
 		} catch (err) {
-			const message = (err as Error).message;
+			const message = err instanceof Error ? err.message : String(err);
 			expect(message).toContain("NOVA_VAPID_PUBLIC_KEY");
 			expect(message).toContain("NOVA_VAPID_PRIVATE_KEY");
 			expect(message).toContain("NOVA_VAPID_SUBJECT");

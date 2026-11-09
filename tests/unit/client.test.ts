@@ -142,11 +142,10 @@ describe("nova > client > subscribe", () => {
 				credentials: "include",
 			}),
 		);
-		const callArgs = fetchSpy.mock.calls[0] as [string, RequestInit];
-		const init = callArgs[1];
-		expect(init.body).toBe(JSON.stringify(SAMPLE_PUSH));
-		const headers = init.headers as Headers;
-		expect(headers.get("content-type")).toBe("application/json");
+		expect(fetchSpy.mock.calls[0]?.[1]).toMatchObject({
+			body: JSON.stringify(SAMPLE_PUSH),
+		});
+		expect(sentHeaders(fetchSpy).get("content-type")).toBe("application/json");
 	});
 
 	it("forwards a Bearer accessToken in the Authorization header", async () => {
@@ -223,9 +222,10 @@ describe("nova > client > subscribe", () => {
 		);
 
 		await subscribe(VAPID_KEY);
-		const args = subscribeSpy.mock.calls[0]?.[0] as PushSubscriptionOptionsInit;
-		expect(args.userVisibleOnly).toBe(true);
-		expect(args.applicationServerKey).toBeInstanceOf(Uint8Array);
+		expect(subscribeSpy.mock.calls[0]?.[0]).toEqual({
+			userVisibleOnly: true,
+			applicationServerKey: expect.any(Uint8Array),
+		});
 	});
 
 	it("throws NovaClientError on non-2xx response", async () => {

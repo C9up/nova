@@ -20,6 +20,7 @@ import {
 	type SubscriptionStore,
 } from "../../src/SubscriptionStore.js";
 import { generateVapidKeys } from "../../src/vapid.js";
+import { asRequested } from "../__helpers__/container.js";
 import { realAuth, realP256dh } from "../__helpers__/subscription.js";
 
 interface RecordedRoute {
@@ -103,12 +104,12 @@ function makeApp({
 				factories.set(token, factory);
 			},
 			async resolve<T = unknown>(token: string | symbol): Promise<T> {
-				if (instances.has(token)) return instances.get(token) as T;
+				if (instances.has(token)) return asRequested<T>(instances.get(token));
 				const factory = factories.get(token);
 				if (!factory) throw new Error(`token not registered: ${String(token)}`);
 				const value = factory();
 				instances.set(token, value);
-				return value as T;
+				return asRequested<T>(value);
 			},
 			has(token: string | symbol): boolean {
 				return factories.has(token) || instances.has(token);
@@ -116,7 +117,7 @@ function makeApp({
 		},
 		config: {
 			get<T = unknown>(key: string): T | undefined {
-				if (key === "nova" && novaConfig) return novaConfig as T;
+				if (key === "nova" && novaConfig) return asRequested<T>(novaConfig);
 				return undefined;
 			},
 		},
@@ -234,8 +235,9 @@ describe("nova > subscribe route (integration)", () => {
 		await handler(ctx);
 
 		expect(captured.status).toBe(400);
-		const errorBody = captured.body as { error: { code: string } };
-		expect(errorBody.error.code).toBe("E_NOVA_INVALID_SUBSCRIPTION");
+		expect(captured.body).toMatchObject({
+			error: { code: "E_NOVA_INVALID_SUBSCRIPTION" },
+		});
 		expect(await store.listByUser("user-1")).toEqual([]);
 	});
 
@@ -260,9 +262,9 @@ describe("nova > subscribe route (integration)", () => {
 		await handler(ctx);
 
 		expect(captured.status).toBe(400);
-		expect((captured.body as { error: { code: string } }).error.code).toBe(
-			"E_NOVA_INVALID_SUBSCRIPTION",
-		);
+		expect(captured.body).toMatchObject({
+			error: { code: "E_NOVA_INVALID_SUBSCRIPTION" },
+		});
 		expect(await store.listByUser("user-1")).toEqual([]);
 	});
 

@@ -34,7 +34,10 @@ export function clearPush(): void {
 	instance = undefined;
 }
 
-const push: Nova = new Proxy({} as Nova, {
+// The target is never read through — every trap forwards to `instance`.
+const target: Nova = Object.create(null);
+
+const push: Nova = new Proxy(target, {
 	get(_target, prop) {
 		// A module loader inspects what it imports before anyone uses it: it reads
 		// `then` to decide whether the namespace is thenable, and various symbols

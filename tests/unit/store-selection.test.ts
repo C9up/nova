@@ -7,12 +7,12 @@ import {
 	MemorySubscriptionDriver,
 	type NovaAppContext,
 	type NovaConfig,
-	type NovaError,
 	NovaProvider,
 	RedisSubscriptionStore,
 	SqlSubscriptionStore,
 	stores,
 } from "../../src/index.js";
+import { asRequested } from "../__helpers__/container.js";
 
 /**
  * `{ default, stores }` — the shape a package takes when several backends are
@@ -32,7 +32,7 @@ function containerStub() {
 			},
 			has: (token: string | symbol) => bindings.has(String(token)),
 			async resolve<T = unknown>(token: string | symbol): Promise<T> {
-				return bindings.get(String(token))?.() as T;
+				return asRequested<T>(bindings.get(String(token))?.());
 			},
 		},
 	};
@@ -47,10 +47,10 @@ function appWith(config: NovaConfig): {
 		bindings,
 		// The provider reads exactly one config key, so the store answers with
 		// the config under test whatever it is asked for.
-		// One cast, at the stub boundary: `get<T>` is generic over what the
-		// caller asks for, and a stub that always answers with one value
-		// cannot express that any other way.
-		app: { container, config: { get: <T = unknown>() => config as T } },
+		app: {
+			container,
+			config: { get: <T = unknown>() => asRequested<T>(config) },
+		},
 	};
 }
 
@@ -118,7 +118,7 @@ describe("nova > store selection", () => {
 				stores: { memory: stores.memory() },
 			});
 		} catch (error) {
-			expect((error as NovaError).hint).toContain("memory");
+			expect(error).toMatchObject({ hint: expect.stringContaining("memory") });
 		}
 	});
 
@@ -198,7 +198,7 @@ describe("nova > store selection > a `default` with nothing to pick from", () =>
 		try {
 			storeFrom({ default: "sql" });
 		} catch (error) {
-			expect((error as NovaError).code).toBe("E_NOVA_UNKNOWN_STORE");
+			expect(error).toMatchObject({ code: "E_NOVA_UNKNOWN_STORE" });
 		}
 	});
 

@@ -3,11 +3,12 @@
  * keeps Redis semantics, both in process.
  */
 
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import type {
 	SubscriptionDatabase,
 	SubscriptionRedisClient,
 } from "../../src/index.js";
+import { asRequested } from "./container.js";
 
 /**
  * The Redis store, against an in-process Redis that behaves like one.
@@ -86,12 +87,29 @@ export function sqliteConnection(): SubscriptionDatabase & { close(): void } {
 	return {
 		dialect: "sqlite",
 		async execute(sql, params = []) {
-			const result = db.prepare(sql).run(...(params as never[]));
+			const result = db.prepare(sql).run(...sqlValues(params));
 			return { rowsAffected: Number(result.changes) };
 		},
+		// Generic over the row shape the store expects, as a driver's is.
 		async query<T>(sql: string, params: unknown[] = []) {
-			return db.prepare(sql).all(...(params as never[])) as T[];
+			return asRequested<T[]>(db.prepare(sql).all(...sqlValues(params)));
 		},
 		close: () => db.close(),
 	};
+}
+
+/** The parameters as `node:sqlite` binds them; anything else is a test bug. */
+function sqlValues(params: readonly unknown[]): SQLInputValue[] {
+	return params.map((value) => {
+		if (
+			value === null ||
+			typeof value === "string" ||
+			typeof value === "number" ||
+			typeof value === "bigint" ||
+			value instanceof Uint8Array
+		) {
+			return value;
+		}
+		throw new TypeError(`cannot bind ${typeof value} to SQLite`);
+	});
 }

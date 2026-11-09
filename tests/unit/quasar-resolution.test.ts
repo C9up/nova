@@ -105,7 +105,8 @@ describe("nova > the key prefix", () => {
 			new RedisSubscriptionStore(CLIENT, { prefix: "a b" });
 			expect.unreachable("a prefix with a space has to be refused");
 		} catch (error) {
-			expect((error as Error).message).toContain('"a b"');
+			expect(error).toBeInstanceOf(Error);
+			expect(error instanceof Error ? error.message : "").toContain('"a b"');
 		}
 	});
 });

@@ -57,10 +57,12 @@ describe("nova.push() — Web Push Protocol headers + body", () => {
 		const scope = nock(ENDPOINT_HOST)
 			.post(ENDPOINT_PATH)
 			.reply(function (_uri, requestBody) {
-				capturedHeaders = this.req.headers as Record<string, string | string[]>;
-				capturedBody = Buffer.isBuffer(requestBody)
-					? requestBody
-					: Buffer.from(requestBody as string, "binary");
+				capturedHeaders = this.req.headers;
+				// nock hands a binary body over as a latin1 string.
+				capturedBody =
+					typeof requestBody === "string"
+						? Buffer.from(requestBody, "binary")
+						: undefined;
 				return [201, "", {}];
 			});
 
@@ -92,7 +94,7 @@ describe("nova.push() — Web Push Protocol headers + body", () => {
 		nock(ENDPOINT_HOST)
 			.post(ENDPOINT_PATH)
 			.reply(function () {
-				capturedHeaders = this.req.headers as Record<string, string | string[]>;
+				capturedHeaders = this.req.headers;
 				return [201, "", {}];
 			});
 

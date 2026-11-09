@@ -115,11 +115,12 @@ export default class NovaProvider {
 			}
 		} else {
 			const vapidConfig = this.#config.vapid;
+			const delivery = this.#config.delivery;
 			this.#app.container.singleton(NOVA_TOKEN, async () => {
 				const store = await this.#app.container.resolve<SubscriptionStore>(
 					SUBSCRIPTION_STORE_TOKEN,
 				);
-				return new Nova(store, vapidConfig);
+				return new Nova(store, vapidConfig, delivery);
 			});
 		}
 	}

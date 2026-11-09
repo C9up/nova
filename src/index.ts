@@ -7,7 +7,9 @@ export { NovaError } from "./errors.js";
 export { FileSubscriptionStore } from "./FileSubscriptionStore.js";
 export {
 	Nova,
+	type NovaDeliveryOptions,
 	type PushFailureReason,
+	type PushHttpClient,
 	type PushOptions,
 	type PushPayload,
 	type PushResult,

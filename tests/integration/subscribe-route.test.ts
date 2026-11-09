@@ -9,13 +9,16 @@
  * exactly the surface that a real `AppContext` would.
  */
 
+import { fakeHttp } from "@c9up/ream/http-client";
 import { describe, expect, it } from "vitest";
+import { Nova } from "../../src/Nova.js";
 import NovaProvider, { type NovaAppContext } from "../../src/NovaProvider.js";
 import {
 	MemorySubscriptionDriver,
 	type PushSubscription,
 	type SubscriptionStore,
 } from "../../src/SubscriptionStore.js";
+import { generateVapidKeys } from "../../src/vapid.js";
 
 interface RecordedRoute {
 	path: string;
@@ -280,5 +283,39 @@ describe("nova > subscribe route (integration)", () => {
 		const { ctx } = makeCtx("user-1", VALID_BODY);
 		await handler(ctx);
 		expect(await customStore.listByUser("user-1")).toHaveLength(1);
+	});
+
+	it("hands config.delivery to the Nova it binds", async () => {
+		const http = fakeHttp({ maxRedirects: 0 });
+		http.on("POST", () => true, { status: 201 });
+		const { router } = makeRouter();
+		const app = makeApp({
+			router,
+			novaConfig: {
+				vapid: { ...generateVapidKeys(), subject: "mailto:ops@example.com" },
+				delivery: { http },
+			},
+		});
+		const provider = new NovaProvider(app);
+		provider.register();
+		await provider.boot();
+
+		const nova = await app.container.resolve("nova");
+		if (!(nova instanceof Nova)) throw new Error("no Nova bound");
+		const result = await nova.push(
+			{
+				...VALID_BODY,
+				keys: { ...VALID_BODY.keys, p256dh: generateVapidKeys().publicKey },
+			},
+			{ title: "x" },
+		);
+
+		expect(result).toEqual({
+			ok: true,
+			status: 201,
+			endpoint: VALID_BODY.endpoint,
+		});
+		expect(http.requests).toHaveLength(1);
+		await provider.shutdown();
 	});
 });

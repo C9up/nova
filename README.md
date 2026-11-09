@@ -81,8 +81,23 @@ const results = await push.pushToUser(userId, { title: 'Order shipped' })
 
 `push()` resolves to `{ ok, status, endpoint }`, and to `{ ok: false, reason }` when the push service
 refuses. A subscription the browser has dropped comes back as `reason: 'gone'` — and nova deletes it
-from the store on the spot, reporting whether that succeeded in `cleaned`. `pushToUser()` fans out
-and returns one result per device: a device that fails does not stop the others.
+from the store on the spot, reporting whether that succeeded in `cleaned`. An endpoint that cannot be
+reached, does not answer in time or answers with more than 16 KiB comes back as
+`reason: 'server-error'` with `status: 0`. `pushToUser()` fans out and returns one result per device:
+a device that fails does not stop the others.
+
+The endpoint is a URL the browser hands over, so the request is sent through the outbound client of
+`@c9up/ream/http-client`: it never connects to a private, loopback or link-local address, reads at
+most 16 KiB of the answer and gives up after the deadline.
+
+```ts
+export default defineConfig({
+  // ...
+  delivery: {
+    timeout: 10_000,   // ms for one push request, connection to answer (default 10 000)
+  },
+})
+```
 
 Options travel per call:
 

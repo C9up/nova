@@ -1,3 +1,4 @@
+import type { NovaDeliveryOptions } from "./Nova.js";
 import type { SubscriptionStore } from "./SubscriptionStore.js";
 import type { SubscriptionStoreFactory } from "./stores.js";
 
@@ -37,6 +38,8 @@ export interface NovaConfig {
 	store?: SubscriptionStore;
 	/** VAPID identity. Required for `nova.push()`; subscription-side endpoints work without it. */
 	vapid?: NovaVapidConfig;
+	/** How push requests leave the server: deadline, outbound client. */
+	delivery?: NovaDeliveryOptions;
 }
 
 export function defineConfig(config: NovaConfig): NovaConfig {

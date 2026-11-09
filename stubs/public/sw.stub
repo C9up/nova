@@ -16,12 +16,17 @@ to: public/sw.js
 //
 // Notificationclick: close the notification, then focus an existing tab
 // whose URL matches `data.url` (preferring visible/focused tabs), falling
-// back to opening a new window. URL comparison normalises the inbound
-// path against the SW origin.
+// back to opening a new window. Only a URL on this origin is followed: the
+// notification is shown under the app's name, so a click must not lead to
+// another site (phishing, open redirect) or run a `javascript:`/`data:` URL.
+// To link elsewhere on purpose, list the origins in ALLOWED_ORIGINS below.
 //
 // Registered from the app via `registerServiceWorker('/sw.js')` from
 // `@c9up/nova/client`. Edit freely — re-running `ream configure @c9up/nova`
 // will NOT overwrite this file.
+
+// Origins besides this one a notification click may open, e.g. 'https://docs.example.com'.
+const ALLOWED_ORIGINS = []
 
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()))
@@ -58,8 +63,18 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   const target = event.notification.data?.url
-  if (!target) return
-  const targetURL = new URL(target, self.location.origin).href
+  if (typeof target !== 'string' || target === '') return
+  let resolved
+  try {
+    resolved = new URL(target, self.location.origin)
+  } catch {
+    return
+  }
+  // An opaque origin (javascript:, data:, blob:) never matches.
+  if (resolved.origin !== self.location.origin && !ALLOWED_ORIGINS.includes(resolved.origin)) {
+    return
+  }
+  const targetURL = resolved.href
   event.waitUntil(
     self.clients
       .matchAll({ type: 'window', includeUncontrolled: true })

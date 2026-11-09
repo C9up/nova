@@ -162,8 +162,12 @@ await subscribe({
 `subscribe()` asks for permission, subscribes through the service worker, and posts the result to
 your application. On logout, call `unsubscribe()` (same options) before the session ends: it
 removes the subscription from your application and drops it in the browser, so a shared or lost
-device stops showing the account's notifications. The `public/sw.js` written by `configure` displays the notification and focuses
-the window on click — edit it, it is yours.
+device stops showing the account's notifications.
+
+The `public/sw.js` written by `configure` displays the notification and, on click, focuses or opens
+the payload's `url` — only on your own origin: a notification shown under your name must not lead
+to another site, nor run a `javascript:` or `data:` URL. List other origins a click may open in its
+`ALLOWED_ORIGINS`. Edit it, it is yours.
 
 ## Storage
 

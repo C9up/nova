@@ -8,8 +8,7 @@
  * a tmpdir. The fs idempotency itself is the responsibility of
  * `createCodemods` from `@c9up/ream` (verified by Ream's own test suite);
  * this file proves the configure hook calls the right APIs in the right
- * order with the right content + that the docs snippets stay in sync with
- * the inlined `SW_TEMPLATE`.
+ * order with the right content, read from the shipped stubs.
  */
 
 import { readFileSync } from "node:fs";
@@ -17,7 +16,8 @@ import { readFile, rename } from "node:fs/promises";
 import path, { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
-import { configure, SW_TEMPLATE } from "../../src/configure.js";
+import { configure } from "../../src/configure.js";
+import { stubsRoot } from "../../src/stubs.js";
 
 /** Narrow away null/undefined without a `!` assertion (which lies to the compiler). */
 function defined<T>(value: T | null | undefined): T {
@@ -42,6 +42,11 @@ const MIGRATION_PATH = path.resolve(
 	"migrations",
 	"0048_create_push_subscriptions.stub",
 );
+
+/** The service worker `configure` writes: the stub's body. */
+function swStub(): string {
+	return renderStub(stubsRoot, "public/sw.stub", {}).body;
+}
 
 interface RecordedWrite {
 	filePath: string;
@@ -152,21 +157,22 @@ describe("configure hook — codemods writes (config/nova.ts + migration + publi
 		expect(migrationWrite.content).toBe(migrationTemplate);
 	});
 
-	it("writes the SW content byte-for-byte from the inlined SW_TEMPLATE", async () => {
+	it("writes the SW content byte-for-byte from the shipped stub", async () => {
 		const fake = makeFakeCodemods();
 		await configure(fake.codemods);
 		const swWrite = defined(fake.writes[2]);
-		expect(swWrite.content).toBe(SW_TEMPLATE);
+		expect(swWrite.content).toBe(swStub());
 	});
 
 	it("SW push handler shows a notification on EVERY push, incl. a data-less one (userVisibleOnly)", () => {
+		const sw = swStub();
 		// A bare `if (!event.data) return` would skip showNotification on a
 		// data-less push and let the browser revoke the userVisibleOnly sub.
-		expect(SW_TEMPLATE).not.toMatch(/if\s*\(\s*!event\.data\s*\)\s*return/);
+		expect(sw).not.toMatch(/if\s*\(\s*!event\.data\s*\)\s*return/);
 		// The data parse is GUARDED (payload stays {} → generic notification),
 		// and showNotification is unconditionally reached afterwards.
-		expect(SW_TEMPLATE).toMatch(/if\s*\(\s*event\.data\s*\)\s*\{/);
-		expect(SW_TEMPLATE).toContain("self.registration.showNotification(");
+		expect(sw).toMatch(/if\s*\(\s*event\.data\s*\)\s*\{/);
+		expect(sw).toContain("self.registration.showNotification(");
 	});
 
 	it("does NOT pass force=true on the migration write (idempotency by path)", async () => {

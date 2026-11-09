@@ -614,3 +614,66 @@ describe("Nova > push() — one aes128gcm record (RFC 8291 §4)", () => {
 		expect(http.requests).toHaveLength(0);
 	});
 });
+
+describe("Nova > push() — Retry-After (RFC 8030 §8.4)", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it.each([
+		[429, "120", 120],
+		[503, "30", 30],
+		[429, "0", 0],
+		[429, " 45 ", 45],
+		[429, "999999999", 86_400],
+	])(
+		"%i with Retry-After %j → retryAfter %i",
+		async (status, header, seconds) => {
+			answer(status, { "retry-after": header });
+			const { nova } = makeNova();
+			expect(await nova.push(SUB_A, PAYLOAD)).toMatchObject({
+				ok: false,
+				status,
+				retryAfter: seconds,
+			});
+		},
+	);
+
+	it("reads an HTTP-date as the seconds left until it", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-11-09T12:00:00Z"));
+		answer(429, { "retry-after": "Mon, 09 Nov 2026 12:01:30 GMT" });
+		const { nova } = makeNova();
+		expect(await nova.push(SUB_A, PAYLOAD)).toMatchObject({
+			reason: "rate-limited",
+			retryAfter: 90,
+		});
+	});
+
+	it("reads a date in the past as 0", async () => {
+		answer(429, { "retry-after": "Wed, 21 Oct 2015 07:28:00 GMT" });
+		const { nova } = makeNova();
+		expect(await nova.push(SUB_A, PAYLOAD)).toMatchObject({ retryAfter: 0 });
+	});
+
+	it.each(["soon", "-5", "1.5", "", "12abc"])(
+		"leaves retryAfter out for the unusable value %j",
+		async (header) => {
+			answer(429, { "retry-after": header });
+			const { nova } = makeNova();
+			const result = await nova.push(SUB_A, PAYLOAD);
+			expect(result).toMatchObject({ reason: "rate-limited" });
+			expect(result).not.toHaveProperty("retryAfter");
+		},
+	);
+
+	it("leaves retryAfter out when the header is absent, or the status is not 429/503", async () => {
+		answer(429);
+		const { nova } = makeNova();
+		expect(await nova.push(SUB_A, PAYLOAD)).not.toHaveProperty("retryAfter");
+
+		http.reset();
+		answer(500, { "retry-after": "60" });
+		expect(await nova.push(SUB_A, PAYLOAD)).not.toHaveProperty("retryAfter");
+	});
+});

@@ -90,6 +90,10 @@ A payload is sent as a single encrypted record, so its JSON may not exceed 3993 
 (RFC 8291 §4). A larger one is not sent: it comes back as `reason: 'too-large'`, `status: 0`.
 Send an identifier and let the service worker fetch the rest.
 
+When the push service throttles (`429`) or is unavailable (`503`) and says for how long, the result
+carries `retryAfter`, in seconds (capped at a day): wait at least that long before pushing to that
+endpoint again, or the push service may end the subscription.
+
 The endpoint is a URL the browser hands over, so the request is sent through the outbound client of
 `@c9up/ream/http-client`: it never connects to a private, loopback or link-local address, reads at
 most 16 KiB of the answer and gives up after the deadline.

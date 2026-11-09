@@ -75,6 +75,12 @@ export type PushResult =
 			endpoint: string;
 			reason: PushFailureReason;
 			cleaned: boolean;
+			/**
+			 * Seconds the push service asked to wait before the next request to
+			 * this endpoint, from its `Retry-After` on a 429 or 503 (capped at a
+			 * day). Absent when it sent none, or one that does not parse.
+			 */
+			retryAfter?: number;
 	  };
 
 /** How push requests leave the server. */
@@ -200,6 +206,7 @@ export class Nova {
 
 		const http = await this.#client();
 		let status: number;
+		let retryAfter: string | undefined;
 		try {
 			const response = await http.request(endpoint, {
 				method: request.method,
@@ -209,6 +216,7 @@ export class Nova {
 				maxResponseBytes: MAX_RESPONSE_BYTES,
 			});
 			status = response.status;
+			retryAfter = response.header("retry-after");
 		} catch (cause) {
 			const failure = transportFailure(cause);
 			if (failure === undefined) throw cause;
@@ -228,7 +236,13 @@ export class Nova {
 		}
 		// What web-push treats as delivered: any 2xx (RFC 8030 §5 answers 201).
 		if (status >= 200 && status <= 299) return { ok: true, status, endpoint };
-		return await this.#mapError(status, endpoint);
+		const result = await this.#mapError(status, endpoint);
+		// RFC 8030 §8.4 pairs Retry-After with 429; RFC 9110 §10.2.3 with 503.
+		if (!result.ok && (status === 429 || status === 503)) {
+			const seconds = parseRetryAfter(retryAfter);
+			if (seconds !== undefined) result.retryAfter = seconds;
+		}
+		return result;
 	}
 
 	async pushToUser(
@@ -356,6 +370,26 @@ export class Nova {
 			cleaned: false,
 		};
 	}
+}
+
+/** A day: a push service asking for longer is not one to wait on blindly. */
+const MAX_RETRY_AFTER = 86_400;
+const HTTP_DATE = /^[A-Za-z]{3,9},? /;
+
+/** `Retry-After` as seconds from now: delta-seconds or an HTTP-date. */
+function parseRetryAfter(value: string | undefined): number | undefined {
+	if (value === undefined) return undefined;
+	const trimmed = value.trim();
+	if (/^\d+$/.test(trimmed)) {
+		return Math.min(Number(trimmed), MAX_RETRY_AFTER);
+	}
+	// Date.parse reads almost anything ("12" is a date to it); only a value
+	// shaped like an HTTP-date (RFC 9110 §5.6.7) is given to it.
+	if (!HTTP_DATE.test(trimmed)) return undefined;
+	const at = Date.parse(trimmed);
+	if (Number.isNaN(at)) return undefined;
+	const seconds = Math.ceil((at - Date.now()) / 1000);
+	return Math.min(Math.max(seconds, 0), MAX_RETRY_AFTER);
 }
 
 function refused(endpoint: string, why: string): PushResult {

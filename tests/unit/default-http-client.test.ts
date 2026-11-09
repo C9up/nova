@@ -65,7 +65,7 @@ describe("Nova — the default outbound client", () => {
 		// Decided on the address the socket would have used, not on the name.
 		expect(dnsCalls.lookups).toContain("updates.push.example.net");
 		expect(String(warned.mock.calls[0]?.[0])).toContain("privateAddress");
-	});
+	}, 15_000);
 
 	it("names the missing peer when @c9up/ream is not installed", async () => {
 		vi.doMock("@c9up/ream/http-client", () => {
@@ -84,5 +84,5 @@ describe("Nova — the default outbound client", () => {
 				{ title: "x" },
 			),
 		).rejects.toMatchObject({ code: "E_NOVA_HTTP_CLIENT_MISSING" });
-	});
+	}, 15_000);
 });

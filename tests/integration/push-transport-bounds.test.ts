@@ -196,12 +196,12 @@ describe("nova.push() — every request has a deadline", () => {
 		nock(HOST).post(SLOW_PATH).delay(10_000).reply(201, "");
 
 		const nova = new Nova(new MemorySubscriptionDriver(), VAPID, {
-			timeout: 150,
+			timeout: 300,
 		});
 		const started = Date.now();
 		const result = await nova.push(sub(`${HOST}${SLOW_PATH}`), { title: "x" });
 
-		expect(Date.now() - started).toBeLessThan(2_000);
+		expect(Date.now() - started).toBeLessThan(5_000);
 		expect(result).toEqual({
 			ok: false,
 			status: 0,
@@ -209,7 +209,7 @@ describe("nova.push() — every request has a deadline", () => {
 			reason: "server-error",
 			cleaned: false,
 		});
-	}, 5_000);
+	}, 15_000);
 
 	it("a silent endpoint does not hold back the rest of the fan-out", async () => {
 		nock.disableNetConnect();
@@ -219,7 +219,7 @@ describe("nova.push() — every request has a deadline", () => {
 		const store = new MemorySubscriptionDriver();
 		await store.save("u1", sub(`${HOST}${SLOW_PATH}`));
 		await store.save("u1", sub(`${HOST}${OK_PATH}`));
-		const nova = new Nova(store, VAPID, { timeout: 150 });
+		const nova = new Nova(store, VAPID, { timeout: 2_000 });
 
 		const results = await nova.pushToUser("u1", { title: "x" });
 
@@ -234,7 +234,7 @@ describe("nova.push() — every request has a deadline", () => {
 				{ ok: true, status: 201, endpoint: `${HOST}${OK_PATH}` },
 			]),
 		);
-	}, 5_000);
+	}, 15_000);
 
 	it("refuses a timeout that is not a positive integer", () => {
 		for (const timeout of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {

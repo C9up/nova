@@ -15,7 +15,10 @@ import {
 	type ResolvedPushTargetPolicy,
 	resolvePushTargetPolicy,
 } from "./_internal/push-services.js";
-import { isSubscriptionFields } from "./_internal/subscription.js";
+import {
+	isSubscriptionFields,
+	MAX_ENDPOINT_LENGTH,
+} from "./_internal/subscription.js";
 import { normaliseUserId } from "./_internal/user-id.js";
 import { NovaError } from "./errors.js";
 import type {
@@ -98,20 +101,7 @@ export class SubscribeController {
 			return;
 		}
 
-		const user = ctx.auth?.user;
-		if (user === undefined || user === null) {
-			throw new NovaError(
-				"E_NOVA_MISSING_USER",
-				"Subscription handler reached without an authenticated user. Did you disable the guard?",
-			);
-		}
-		const userId = normaliseUserId(user.id);
-		if (userId === undefined) {
-			throw new NovaError(
-				"E_NOVA_INVALID_USER_ID",
-				"The authenticated user has no usable id: expected a non-empty string or an integer.",
-			);
-		}
+		const userId = authenticatedUserId(ctx);
 
 		try {
 			await this.#store.save(userId, subscription);
@@ -133,6 +123,39 @@ export class SubscribeController {
 			.json({ ok: true, endpoint: subscription.endpoint });
 	}
 
+	/**
+	 * `DELETE {routePrefix}/subscribe` with `{ endpoint }`: detach this
+	 * browser from the signed-in account, on logout. Only the caller's own
+	 * subscription is removed — the store's `delete` removes an endpoint
+	 * whoever holds it, so ownership is checked first, and another user's
+	 * endpoint answers 404 exactly like one that does not exist.
+	 */
+	async unsubscribe(ctx: SubscribeContext): Promise<void> {
+		const endpoint = endpointOf(ctx.request.body());
+		if (endpoint === undefined) {
+			ctx.response.status(400).json({
+				error: {
+					code: "E_NOVA_INVALID_SUBSCRIPTION",
+					message: "Expected { endpoint } naming the subscription to remove",
+				},
+			});
+			return;
+		}
+		const userId = authenticatedUserId(ctx);
+		const held = await this.#store.listByUser(userId);
+		if (!held.some((subscription) => subscription.endpoint === endpoint)) {
+			ctx.response.status(404).json({
+				error: {
+					code: "E_NOVA_SUBSCRIPTION_NOT_FOUND",
+					message: "No such subscription for this user",
+				},
+			});
+			return;
+		}
+		await this.#store.delete(endpoint);
+		ctx.response.status(200).json({ ok: true, endpoint });
+	}
+
 	/** Drop the user's oldest subscriptions past the cap — never the one just saved. */
 	async #trim(userId: string, kept: string): Promise<void> {
 		const held = await this.#store.listByUser(userId);
@@ -145,6 +168,36 @@ export class SubscribeController {
 			excess -= 1;
 		}
 	}
+}
+
+/** The signed-in user's id, as the stores key it. */
+function authenticatedUserId(ctx: SubscribeContext): string {
+	const user = ctx.auth?.user;
+	if (user === undefined || user === null) {
+		throw new NovaError(
+			"E_NOVA_MISSING_USER",
+			"Subscription handler reached without an authenticated user. Did you disable the guard?",
+		);
+	}
+	const userId = normaliseUserId(user.id);
+	if (userId === undefined) {
+		throw new NovaError(
+			"E_NOVA_INVALID_USER_ID",
+			"The authenticated user has no usable id: expected a non-empty string or an integer.",
+		);
+	}
+	return userId;
+}
+
+/** The `endpoint` of an unsubscribe body, or undefined when there is none. */
+function endpointOf(body: unknown): string | undefined {
+	if (typeof body !== "object" || body === null || !("endpoint" in body)) {
+		return undefined;
+	}
+	const { endpoint } = body;
+	if (typeof endpoint !== "string" || endpoint.length === 0) return undefined;
+	if (endpoint.length > MAX_ENDPOINT_LENGTH) return undefined;
+	return endpoint;
 }
 
 /**

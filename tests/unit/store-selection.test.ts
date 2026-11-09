@@ -221,9 +221,8 @@ describe("NovaProvider > shutdown", () => {
 	/** An app whose container also answers `router`, which boot() mounts on. */
 	function bootableApp(): NovaAppContext {
 		const { app, bindings } = appWith(configured());
-		bindings.set("router", () => ({
-			post: () => ({ guard: () => undefined }),
-		}));
+		const route = { guard: () => route, use: () => route };
+		bindings.set("router", () => ({ post: () => route, delete: () => route }));
 		return app;
 	}
 

@@ -31,7 +31,34 @@ interface RecordedRoute {
 
 function makeRouter() {
 	const routes: RecordedRoute[] = [];
+	const deletes: RecordedRoute[] = [];
+	const record = (
+		into: RecordedRoute[],
+		path: string,
+		handler: (ctx: unknown) => unknown,
+	) => {
+		const recorded: RecordedRoute = {
+			path,
+			guards: [],
+			middleware: [],
+			handler,
+		};
+		into.push(recorded);
+		return {
+			guard(...guards: string[]) {
+				recorded.guards.push(...guards);
+				return this;
+			},
+			use(...middleware: unknown[]) {
+				recorded.middleware.push(...middleware);
+				return this;
+			},
+		};
+	};
 	const router = {
+		delete(path: string, handler: (ctx: unknown) => unknown) {
+			return record(deletes, path, handler);
+		},
 		post(path: string, handler: (ctx: unknown) => unknown) {
 			const recorded: RecordedRoute = {
 				path,
@@ -52,7 +79,7 @@ function makeRouter() {
 			};
 		},
 	};
-	return { router, routes };
+	return { router, routes, deletes };
 }
 
 function makeApp({
@@ -547,5 +574,84 @@ describe("nova > subscribe route — abuse limits from the config", () => {
 			await handler(ctx);
 		}
 		expect(await store.listByUser("user-1")).toHaveLength(2);
+	});
+});
+
+describe("nova > unsubscribe route", () => {
+	async function mounted(novaConfig?: Record<string, unknown>) {
+		const { router, routes, deletes } = makeRouter();
+		const store = new MemorySubscriptionDriver();
+		const provider = new NovaProvider(makeApp({ router, store, novaConfig }));
+		provider.register();
+		await provider.start();
+		const subscribeHandler = routes[0]?.handler;
+		const unsubscribeHandler = deletes[0]?.handler;
+		if (!subscribeHandler || !unsubscribeHandler) {
+			throw new Error("routes not captured");
+		}
+		return { store, deletes, subscribeHandler, unsubscribeHandler };
+	}
+
+	it("registers DELETE {prefix}/subscribe with the same guard and middleware", async () => {
+		const throttle = async (_ctx: never, next: () => Promise<void>) => {
+			await next();
+		};
+		const { deletes } = await mounted({
+			routePrefix: "/v2/push",
+			guard: "session",
+			middleware: [throttle],
+		});
+		expect(deletes).toHaveLength(1);
+		expect(deletes[0]?.path).toBe("/v2/push/subscribe");
+		expect(deletes[0]?.guards).toEqual(["session"]);
+		expect(deletes[0]?.middleware).toEqual([throttle]);
+	});
+
+	it("removes the authenticated user's own subscription", async () => {
+		const { store, subscribeHandler, unsubscribeHandler } = await mounted();
+		await subscribeHandler(makeCtx("user-1", VALID_BODY).ctx);
+
+		const { ctx, captured } = makeCtx("user-1", {
+			endpoint: VALID_BODY.endpoint,
+		});
+		await unsubscribeHandler(ctx);
+
+		expect(captured.status).toBe(200);
+		expect(await store.listByUser("user-1")).toEqual([]);
+	});
+
+	it("answers 404 for an endpoint another user holds, and keeps it", async () => {
+		const { store, subscribeHandler, unsubscribeHandler } = await mounted();
+		await subscribeHandler(makeCtx("victim", VALID_BODY).ctx);
+
+		const { ctx, captured } = makeCtx("attacker", {
+			endpoint: VALID_BODY.endpoint,
+		});
+		await unsubscribeHandler(ctx);
+
+		expect(captured.status).toBe(404);
+		expect(captured.body).toMatchObject({
+			error: { code: "E_NOVA_SUBSCRIPTION_NOT_FOUND" },
+		});
+		expect(await store.listByUser("victim")).toEqual([VALID_BODY]);
+	});
+
+	it.each([[{}], [{ endpoint: 42 }], [null], ["https://fcm.googleapis.com/x"]])(
+		"answers 400 to the body %j",
+		async (body) => {
+			const { unsubscribeHandler } = await mounted();
+			const { ctx, captured } = makeCtx("user-1", body);
+			await unsubscribeHandler(ctx);
+			expect(captured.status).toBe(400);
+		},
+	);
+
+	it("names the guard when no user reached it", async () => {
+		const { unsubscribeHandler } = await mounted({ guard: null });
+		await expect(
+			unsubscribeHandler(
+				makeCtx(undefined, { endpoint: VALID_BODY.endpoint }).ctx,
+			),
+		).rejects.toMatchObject({ code: "E_NOVA_MISSING_USER" });
 	});
 });

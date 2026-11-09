@@ -110,17 +110,10 @@ export async function subscribe(
 
 	const target = options.endpoint ?? "/api/nova/subscribe";
 	const credentials = options.credentials ?? "include";
-	const headers = new Headers(options.headers);
-	if (!headers.has("content-type")) {
-		headers.set("content-type", "application/json");
-	}
-	if (options.accessToken && !headers.has("authorization")) {
-		headers.set("authorization", `Bearer ${options.accessToken}`);
-	}
 	const response = await fetch(target, {
 		method: "POST",
 		credentials,
-		headers,
+		headers: requestHeaders(options),
 		body: JSON.stringify(pushSubscription.toJSON()),
 	});
 	if (response.status !== 201) {
@@ -131,6 +124,65 @@ export async function subscribe(
 		);
 	}
 	return pushSubscription;
+}
+
+/**
+ * Detach this browser from the signed-in account — call it on logout, before
+ * the session ends:
+ *  1. `DELETE` the subscription's endpoint from the Nova route (scoped to the
+ *     authenticated user server-side; a 404 means it is already gone there).
+ *  2. `PushSubscription.unsubscribe()`, even when step 1 failed: a dead
+ *     endpoint is answered 410 by the push service, which deletes any row left
+ *     behind at the next push.
+ *
+ * Resolves `false` when the browser held no subscription, `true` once it is
+ * dropped; throws `NovaClientError` when the server refused (after dropping it).
+ * Takes the same options as `subscribe()`.
+ */
+export async function unsubscribe(
+	options: SubscribeOptions = {},
+): Promise<boolean> {
+	if (typeof navigator === "undefined" || !navigator.serviceWorker) {
+		throw new NovaClientError(
+			"Service Workers are not supported in this environment.",
+		);
+	}
+	const registration = await navigator.serviceWorker.ready;
+	const current = await registration.pushManager.getSubscription();
+	if (current === null) return false;
+
+	let failure: NovaClientError | undefined;
+	try {
+		const response = await fetch(options.endpoint ?? "/api/nova/subscribe", {
+			method: "DELETE",
+			credentials: options.credentials ?? "include",
+			headers: requestHeaders(options),
+			body: JSON.stringify({ endpoint: current.endpoint }),
+		});
+		if (!response.ok && response.status !== 404) {
+			const responseBody = await response.text().catch(() => "");
+			failure = new NovaClientError(
+				`Nova unsubscribe endpoint responded ${response.status} ${response.statusText}`,
+				{ status: response.status, responseBody },
+			);
+		}
+	} finally {
+		await current.unsubscribe();
+	}
+	if (failure) throw failure;
+	return true;
+}
+
+/** `content-type: application/json`, the caller's headers, the bearer shorthand. */
+function requestHeaders(options: SubscribeOptions): Headers {
+	const headers = new Headers(options.headers);
+	if (!headers.has("content-type")) {
+		headers.set("content-type", "application/json");
+	}
+	if (options.accessToken && !headers.has("authorization")) {
+		headers.set("authorization", `Bearer ${options.accessToken}`);
+	}
+	return headers;
 }
 
 /**

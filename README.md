@@ -59,7 +59,9 @@ export default defineConfig({
 ```
 
 The provider registers `POST {routePrefix}/subscribe`, guarded unless `guard` is `null`. Its handler
-stores the browser's subscription against the authenticated user.
+stores the browser's subscription against the authenticated user. `DELETE {routePrefix}/subscribe`
+with `{ endpoint }` removes it again — only from the authenticated user; another user's endpoint
+answers `404`.
 
 `vapid` is only needed to SEND: the subscription endpoint works without it.
 
@@ -158,7 +160,9 @@ await subscribe({
 ```
 
 `subscribe()` asks for permission, subscribes through the service worker, and posts the result to
-your application. The `public/sw.js` written by `configure` displays the notification and focuses
+your application. On logout, call `unsubscribe()` (same options) before the session ends: it
+removes the subscription from your application and drops it in the browser, so a shared or lost
+device stops showing the account's notifications. The `public/sw.js` written by `configure` displays the notification and focuses
 the window on click — edit it, it is yours.
 
 ## Storage
@@ -304,7 +308,7 @@ device, `gone` cleanup) build a real `Nova` over a `MemorySubscriptionDriver` se
 | `@c9up/nova` | `Nova`, `defineConfig`, `stores`, `generateVapidKeys`, the store classes, errors |
 | `@c9up/nova/provider` | the provider — routes, container bindings |
 | `@c9up/nova/services/main` | the container accessor, for sending from anywhere |
-| `@c9up/nova/client` | `registerServiceWorker`, `subscribe`, `urlBase64ToUint8Array` |
+| `@c9up/nova/client` | `registerServiceWorker`, `subscribe`, `unsubscribe`, `urlBase64ToUint8Array` |
 | `@c9up/nova/commands` | the console commands, registered by `configure` |
 | `@c9up/nova/configure` | the `configure` hook |
 | `@c9up/nova/testing` | `FakeNova` |

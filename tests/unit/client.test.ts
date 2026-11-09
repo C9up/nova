@@ -7,6 +7,7 @@ import {
 	NovaClientError,
 	registerServiceWorker,
 	subscribe,
+	unsubscribe,
 	urlBase64ToUint8Array,
 } from "../../src/client/subscribe.js";
 
@@ -252,5 +253,84 @@ describe("nova > client > subscribe", () => {
 			value: undefined,
 		});
 		await expect(subscribe(VAPID_KEY)).rejects.toBeInstanceOf(NovaClientError);
+	});
+});
+
+describe("nova > client > unsubscribe", () => {
+	const ENDPOINT = "https://fcm.googleapis.com/fcm/send/abc";
+
+	function installExisting(existing: { endpoint: string } | null): {
+		browserUnsubscribe: ReturnType<typeof vi.fn>;
+	} {
+		const browserUnsubscribe = vi.fn().mockResolvedValue(true);
+		const current =
+			existing === null
+				? null
+				: { endpoint: existing.endpoint, unsubscribe: browserUnsubscribe };
+		Object.defineProperty(globalThis.navigator, "serviceWorker", {
+			configurable: true,
+			value: {
+				ready: Promise.resolve({
+					pushManager: { getSubscription: vi.fn().mockResolvedValue(current) },
+				}),
+			},
+		});
+		return { browserUnsubscribe };
+	}
+
+	it("tells the server, then drops the browser's subscription", async () => {
+		const { browserUnsubscribe } = installExisting({ endpoint: ENDPOINT });
+		const fetchSpy = vi
+			.fn()
+			.mockResolvedValue(new Response("{}", { status: 200 }));
+		vi.stubGlobal("fetch", fetchSpy);
+
+		expect(await unsubscribe({ accessToken: "t0k" })).toBe(true);
+
+		expect(fetchSpy).toHaveBeenCalledWith(
+			"/api/nova/subscribe",
+			expect.objectContaining({
+				method: "DELETE",
+				credentials: "include",
+				body: JSON.stringify({ endpoint: ENDPOINT }),
+			}),
+		);
+		expect(sentHeaders(fetchSpy).get("authorization")).toBe("Bearer t0k");
+		expect(browserUnsubscribe).toHaveBeenCalledOnce();
+	});
+
+	it("answers false and sends nothing when the browser holds no subscription", async () => {
+		installExisting(null);
+		const fetchSpy = vi.fn();
+		vi.stubGlobal("fetch", fetchSpy);
+
+		expect(await unsubscribe()).toBe(false);
+		expect(fetchSpy).not.toHaveBeenCalled();
+	});
+
+	it("treats a 404 as already gone on the server", async () => {
+		const { browserUnsubscribe } = installExisting({ endpoint: ENDPOINT });
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue(new Response("{}", { status: 404 })),
+		);
+
+		expect(await unsubscribe()).toBe(true);
+		expect(browserUnsubscribe).toHaveBeenCalledOnce();
+	});
+
+	it("still drops the browser's subscription when the server refuses, then reports it", async () => {
+		const { browserUnsubscribe } = installExisting({ endpoint: ENDPOINT });
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue(new Response("no", { status: 401 })),
+		);
+
+		await expect(unsubscribe()).rejects.toMatchObject({
+			name: "NovaClientError",
+			status: 401,
+		});
+		// A dead endpoint is cleaned server-side at its next push (410).
+		expect(browserUnsubscribe).toHaveBeenCalledOnce();
 	});
 });

@@ -6,9 +6,9 @@
  *                MemorySubscriptionDriver unless `config.nova.store` overrides).
  *   boot()     — publishes the module-level singleton.
  *   start()    — resolves the framework Router and registers
- *                `POST {routePrefix}/subscribe`, optionally guarded by the
- *                configured strategy. In `start`, which is the phase upstream
- *                documents for routes.
+ *                `POST {routePrefix}/subscribe` and its `DELETE` (logout),
+ *                optionally guarded by the configured strategy. In `start`,
+ *                which is the phase upstream documents for routes.
  *   shutdown() — no-op; the in-memory driver is GC'd with the container.
  *
  * The provider is structurally typed against an `AppContext`-compatible
@@ -63,6 +63,10 @@ interface RouterLike {
 	 * inside the one place that cannot check it.
 	 */
 	post(
+		path: string,
+		handler: (ctx: SubscribeContext) => unknown,
+	): RouteBuilderLike;
+	delete(
 		path: string,
 		handler: (ctx: SubscribeContext) => unknown,
 	): RouteBuilderLike;
@@ -212,16 +216,23 @@ export default class NovaProvider {
 			maxSubscriptionsPerUser: this.#config.maxSubscriptionsPerUser,
 		});
 
-		const route = router.post(path, async (ctx: SubscribeContext) => {
-			await controller.handle(ctx);
-		});
+		const routes = [
+			router.post(path, async (ctx: SubscribeContext) => {
+				await controller.handle(ctx);
+			}),
+			// Logout detaches the browser: without it a shared or lost device keeps
+			// showing the account's notifications.
+			router.delete(path, async (ctx: SubscribeContext) => {
+				await controller.unsubscribe(ctx);
+			}),
+		];
 
 		const guard = this.#config.guard === undefined ? "jwt" : this.#config.guard;
-		if (typeof guard === "string" && guard.length > 0) {
-			route.guard(guard);
-		}
 		const middleware = this.#config.middleware ?? [];
-		if (middleware.length > 0) route.use(...middleware);
+		for (const route of routes) {
+			if (typeof guard === "string" && guard.length > 0) route.guard(guard);
+			if (middleware.length > 0) route.use(...middleware);
+		}
 	}
 
 	async shutdown(): Promise<void> {

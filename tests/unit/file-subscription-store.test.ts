@@ -11,7 +11,16 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FileSubscriptionStore, NovaError } from "../../src/index.js";
-import { keyOfLength, subscription } from "../__helpers__/subscription.js";
+import {
+	keyOfLength,
+	realAuth,
+	realP256dh,
+	subscription,
+} from "../__helpers__/subscription.js";
+
+/** One real key pair, so a written record and the expected read agree. */
+const P256DH = realP256dh();
+const AUTH = realAuth();
 
 /**
  * The file store, against a real filesystem.
@@ -131,7 +140,7 @@ describe("nova > FileSubscriptionStore", () => {
 					"https://push.example/half": {
 						userId: "user-A",
 						expirationTime: null,
-						auth: keyOfLength("auth", 22),
+						auth: AUTH,
 					},
 				},
 			}),
@@ -168,8 +177,8 @@ describe("nova > FileSubscriptionStore", () => {
 					"https://push.example/x": {
 						userId: "user-A",
 						expirationTime: "soon",
-						p256dh: keyOfLength("p256dh", 87),
-						auth: keyOfLength("auth", 22),
+						p256dh: P256DH,
+						auth: AUTH,
 					},
 				},
 			}),
@@ -191,8 +200,8 @@ describe("nova > FileSubscriptionStore", () => {
 					"https://push.example/forever": {
 						userId: "user-A",
 						expirationTime: null,
-						p256dh: keyOfLength("p256dh", 87),
-						auth: keyOfLength("auth", 22),
+						p256dh: P256DH,
+						auth: AUTH,
 					},
 				},
 			}),
@@ -206,8 +215,8 @@ describe("nova > FileSubscriptionStore", () => {
 				endpoint: "https://push.example/forever",
 				expirationTime: null,
 				keys: {
-					p256dh: keyOfLength("p256dh", 87),
-					auth: keyOfLength("auth", 22),
+					p256dh: P256DH,
+					auth: AUTH,
 				},
 			},
 		]);
@@ -223,8 +232,8 @@ describe("nova > FileSubscriptionStore", () => {
 					"http://push.example/plain": {
 						userId: "user-A",
 						expirationTime: null,
-						p256dh: keyOfLength("p256dh", 87),
-						auth: keyOfLength("auth", 22),
+						p256dh: P256DH,
+						auth: AUTH,
 					},
 				},
 			}),
@@ -249,7 +258,7 @@ describe("nova > FileSubscriptionStore", () => {
 						// Truncated: base64url, but not a P-256 point. Left to pass,
 						// this failed in the push layer's encryption instead.
 						p256dh: keyOfLength("p256dh", 40),
-						auth: keyOfLength("auth", 22),
+						auth: AUTH,
 					},
 				},
 			}),
@@ -257,7 +266,7 @@ describe("nova > FileSubscriptionStore", () => {
 		);
 
 		await expect(store.listByUser("user-A")).rejects.toThrow(
-			/`p256dh` key is 40 characters, outside the 86–90/,
+			/`p256dh` key decodes to 30 bytes, not the 65/,
 		);
 	});
 
@@ -268,7 +277,7 @@ describe("nova > FileSubscriptionStore", () => {
 			store.save("user-A", {
 				endpoint: "https://push.example/bad",
 				expirationTime: null,
-				keys: { p256dh: "too-short", auth: keyOfLength("auth", 22) },
+				keys: { p256dh: "too-short", auth: AUTH },
 			}),
 		).rejects.toThrow(/cannot be stored/);
 

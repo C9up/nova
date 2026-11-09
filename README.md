@@ -94,6 +94,9 @@ An endpoint must also belong to a known push service: FCM (`fcm.googleapis.com`)
 (`push.services.mozilla.com`), WNS (`notify.windows.com`) or Apple (`push.apple.com`), each with its
 subdomains. The subscribe route answers `400 E_NOVA_INVALID_SUBSCRIPTION` for anything else, and a
 stored row that does not match is not sent to: it comes back as `reason: 'refused'`, `status: 0`.
+The keys are checked as closely: `p256dh` must be a point on P-256 (65 bytes) and `auth` a 16-byte
+secret. A stored subscription whose keys cannot be used is deleted at its next push and reported as
+`reason: 'gone'`, `status: 0`.
 
 ```ts
 import { DEFAULT_PUSH_SERVICES, defineConfig } from '@c9up/nova'

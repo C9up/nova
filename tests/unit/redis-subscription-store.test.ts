@@ -4,7 +4,15 @@ import {
 	RedisSubscriptionStore,
 	type SubscriptionRedisClient,
 } from "../../src/index.js";
-import { keyOfLength, subscription } from "../__helpers__/subscription.js";
+import {
+	realAuth,
+	realP256dh,
+	subscription,
+} from "../__helpers__/subscription.js";
+
+/** One real key pair, so a written record and the expected read agree. */
+const P256DH = realP256dh();
+const AUTH = realAuth();
 
 /**
  * The Redis store, against an in-process Redis that behaves like one.
@@ -162,7 +170,7 @@ describe("nova > RedisSubscriptionStore > what it will and will not read back", 
 			userId: "user-A",
 			expirationTime: null,
 			p256dh: "TRUNCATED",
-			auth: keyOfLength("auth", 22),
+			auth: AUTH,
 		});
 
 		// It used to come back whole. web-push then fails on it as an
@@ -176,8 +184,8 @@ describe("nova > RedisSubscriptionStore > what it will and will not read back", 
 	it("does not hand back a record whose `expirationTime` is missing", async () => {
 		seed("https://push.example/two", {
 			userId: "user-A",
-			p256dh: keyOfLength("p256dh", 87),
-			auth: keyOfLength("auth", 22),
+			p256dh: P256DH,
+			auth: AUTH,
 		});
 
 		// The type says `number | null`. The guard used to check three strings
@@ -189,8 +197,8 @@ describe("nova > RedisSubscriptionStore > what it will and will not read back", 
 		seed("ftp://push.example/three", {
 			userId: "user-A",
 			expirationTime: null,
-			p256dh: keyOfLength("p256dh", 87),
-			auth: keyOfLength("auth", 22),
+			p256dh: P256DH,
+			auth: AUTH,
 		});
 
 		expect(await store.listByUser("user-A")).toEqual([]);
@@ -215,7 +223,7 @@ describe("nova > RedisSubscriptionStore > what it will and will not read back", 
 			store.save("user-A", {
 				endpoint: "https://push.example/five",
 				expirationTime: null,
-				keys: { p256dh: "too-short", auth: keyOfLength("auth", 22) },
+				keys: { p256dh: "too-short", auth: AUTH },
 			}),
 		).rejects.toMatchObject({
 			code: "E_NOVA_INVALID_SUBSCRIPTION",

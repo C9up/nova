@@ -19,6 +19,7 @@ import {
 	type SubscriptionStore,
 } from "../../src/SubscriptionStore.js";
 import { generateVapidKeys } from "../../src/vapid.js";
+import { realAuth, realP256dh } from "../__helpers__/subscription.js";
 
 interface RecordedRoute {
 	path: string;
@@ -111,16 +112,12 @@ function makeCtx(userId: string | undefined, body: unknown) {
 	return { ctx, captured };
 }
 
-// Realistic-shape fixtures: p256dh = 65 raw bytes → 87 base64url chars,
-// auth = 16 raw bytes → 22 base64url chars. Bytes themselves are fake.
+// A real browser-shaped subscription: p256dh is a point on P-256 (65 bytes),
+// auth a 16-byte secret.
 const VALID_BODY: PushSubscription = {
 	endpoint: "https://fcm.googleapis.com/fcm/send/abc123",
 	expirationTime: null,
-	keys: {
-		p256dh:
-			"BNcRdreALRFXTkOiHpMpfHJoDRvSgGUgmCNNxPaLyzPnlJSNiy3Y0VFm8eq2RRvODPHc4P10qOrjTlnmyUrpbyA",
-		auth: "tBHItJI5sVmRaTQX6w4qEA",
-	},
+	keys: { p256dh: realP256dh(), auth: realAuth() },
 };
 
 describe("nova > subscribe route (integration)", () => {
@@ -302,13 +299,7 @@ describe("nova > subscribe route (integration)", () => {
 
 		const nova = await app.container.resolve("nova");
 		if (!(nova instanceof Nova)) throw new Error("no Nova bound");
-		const result = await nova.push(
-			{
-				...VALID_BODY,
-				keys: { ...VALID_BODY.keys, p256dh: generateVapidKeys().publicKey },
-			},
-			{ title: "x" },
-		);
+		const result = await nova.push(VALID_BODY, { title: "x" });
 
 		expect(result).toEqual({
 			ok: true,

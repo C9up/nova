@@ -32,7 +32,7 @@ const SUB_B: PushSubscription = {
 	expirationTime: null,
 	keys: {
 		p256dh: generateVapidKeys().publicKey,
-		auth: "AbCdEfGhIjKlMnOpQrStUv",
+		auth: "AbCdEfGhIjKlMnOpQrStUg",
 	},
 };
 
@@ -539,6 +539,35 @@ describe("Nova > push() — only push services are contacted", () => {
 						pushServices: [entry],
 					}),
 			).toThrow(/pushServices/);
+		},
+	);
+});
+
+describe("Nova > push() — a subscription whose keys cannot be used", () => {
+	it.each([
+		["a 64-byte p256dh", "B".repeat(86), "tBHItJI5sVmRaTQX6w4qEA"],
+		["a 19-byte auth", generateVapidKeys().publicKey, "A".repeat(26)],
+	])(
+		"is deleted from the store without a request (%s)",
+		async (_label, p256dh, auth) => {
+			answer(201);
+			const store = new MemorySubscriptionDriver();
+			// Stored before the boundary checked keys this closely.
+			const dead = { ...SUB_A, keys: { p256dh, auth } };
+			await store.save("u1", dead);
+			const nova = new Nova(store, VALID_VAPID, { http });
+
+			const result = await nova.push(dead, PAYLOAD);
+
+			expect(result).toEqual({
+				ok: false,
+				status: 0,
+				endpoint: SUB_A.endpoint,
+				reason: "gone",
+				cleaned: true,
+			});
+			expect(http.requests).toHaveLength(0);
+			expect(await store.listByUser("u1")).toEqual([]);
 		},
 	);
 });

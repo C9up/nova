@@ -30,6 +30,7 @@ import {
 	type ResolvedPushTargetPolicy,
 	resolvePushTargetPolicy,
 } from "./_internal/push-services.js";
+import { keysProblem } from "./_internal/subscription.js";
 import { validateVapidConfig } from "./_internal/vapid-config.js";
 import type { NovaVapidConfig } from "./config.js";
 import type {
@@ -154,6 +155,13 @@ export class Nova {
 		// Checked again at send time: a row may predate the rule, or the list.
 		const refusal = pushTargetProblem(endpoint, this.#targets);
 		if (refusal !== null) return refused(endpoint, refusal);
+		// Keys nothing can be encrypted for never become deliverable, and no
+		// push service will ever answer 410 for them: forget them now.
+		const unusable = keysProblem(
+			subscription.keys?.p256dh,
+			subscription.keys?.auth,
+		);
+		if (unusable !== null) return await this.#forget(endpoint, 0, unusable);
 
 		const request = webpush.generateRequestDetails(
 			subscription,
@@ -251,19 +259,28 @@ export class Nova {
 		return this.#validatedVapid;
 	}
 
+	/** A subscription that will never be delivered: delete it, say whether that worked. */
+	async #forget(
+		endpoint: string,
+		status: number,
+		why: string,
+	): Promise<PushResult> {
+		let cleaned = true;
+		try {
+			await this.#store.delete(endpoint);
+		} catch (cleanupErr) {
+			cleaned = false;
+			console.error(
+				`[nova] subscription ${hostOf(endpoint)} is gone (${why}) but cleanup failed`,
+				cleanupErr,
+			);
+		}
+		return { ok: false, status, endpoint, reason: "gone", cleaned };
+	}
+
 	async #mapError(status: number, endpoint: string): Promise<PushResult> {
 		if (status === 404 || status === 410) {
-			let cleaned = true;
-			try {
-				await this.#store.delete(endpoint);
-			} catch (cleanupErr) {
-				cleaned = false;
-				console.error(
-					`[nova] subscription ${hostOf(endpoint)} returned ${status} (gone) but cleanup failed`,
-					cleanupErr,
-				);
-			}
-			return { ok: false, status, endpoint, reason: "gone", cleaned };
+			return await this.#forget(endpoint, status, `returned ${status}`);
 		}
 
 		if (status === 413) {

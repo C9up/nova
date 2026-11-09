@@ -6,6 +6,7 @@
  * to what it writes as the subscribe endpoint applies to what arrives. A
  * fixture the stores would refuse proves nothing about the stores.
  */
+import { createECDH, randomBytes } from "node:crypto";
 import type { PushSubscription } from "../../src/index.js";
 
 const ALPHABET =
@@ -20,16 +21,29 @@ export function keyOfLength(seed: string, length: number): string {
 	return out;
 }
 
+/** A fresh uncompressed P-256 point, base64url — what a browser sends. */
+export function realP256dh(): string {
+	const ecdh = createECDH("prime256v1");
+	ecdh.generateKeys();
+	return ecdh.getPublicKey().toString("base64url");
+}
+
+/** A fresh 16-byte auth secret, base64url. */
+export function realAuth(): string {
+	return randomBytes(16).toString("base64url");
+}
+
+/** One key pair per endpoint, so two fixtures for the same endpoint agree. */
+const keysByEndpoint = new Map<string, { p256dh: string; auth: string }>();
+
 export function subscription(
 	endpoint: string,
 	expirationTime: number | null = null,
 ): PushSubscription {
-	return {
-		endpoint,
-		expirationTime,
-		keys: {
-			p256dh: keyOfLength(`p256dh-${endpoint}`, 87),
-			auth: keyOfLength(`auth-${endpoint}`, 22),
-		},
-	};
+	let keys = keysByEndpoint.get(endpoint);
+	if (keys === undefined) {
+		keys = { p256dh: realP256dh(), auth: realAuth() };
+		keysByEndpoint.set(endpoint, keys);
+	}
+	return { endpoint, expirationTime, keys: { ...keys } };
 }

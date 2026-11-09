@@ -9,6 +9,8 @@
  * refused where it can still be pointed at.
  */
 
+import { createPublicKey } from "node:crypto";
+
 /**
  * The `endpoint VARCHAR(768)` storage column (InnoDB primary-key index budget)
  * — an over-long endpoint is refused at the boundary rather than failing deep
@@ -18,10 +20,10 @@
 export const MAX_ENDPOINT_LENGTH = 768;
 
 const BASE64URL_CHARS = /^[A-Za-z0-9_-]+$/;
-/** An uncompressed P-256 point, base64url: 65 bytes. */
-const P256DH_LENGTH_RANGE: readonly [number, number] = [86, 90];
-/** The auth secret, base64url: 16 bytes. */
-const AUTH_LENGTH_RANGE: readonly [number, number] = [22, 26];
+/** RFC 8291 §3.1: the uncompressed P-256 point, 0x04 || X || Y. */
+const P256DH_BYTES = 65;
+/** RFC 8291 §3.2: the auth secret. */
+const AUTH_BYTES = 16;
 
 /** A subscription flattened to its four values, however it was stored. */
 export interface SubscriptionFields {
@@ -39,21 +41,61 @@ export interface UncheckedSubscriptionFields {
 	auth: unknown;
 }
 
-function base64UrlProblem(
+/** The bytes a base64url key decodes to, or a reason it does not. */
+function decodeKey(
 	value: unknown,
 	name: string,
-	[min, max]: readonly [number, number],
-): string | null {
+	bytes: number,
+): Buffer | string {
 	if (typeof value !== "string" || value.length === 0) {
 		return `the \`${name}\` key is not a string`;
-	}
-	if (value.length < min || value.length > max) {
-		return `the \`${name}\` key is ${value.length} characters, outside the ${min}–${max} a valid one has`;
 	}
 	if (!BASE64URL_CHARS.test(value)) {
 		return `the \`${name}\` key is not base64url`;
 	}
+	const decoded = Buffer.from(value, "base64url");
+	if (decoded.length !== bytes) {
+		return `the \`${name}\` key decodes to ${decoded.length} bytes, not the ${bytes} a valid one has`;
+	}
+	// Re-encoding catches what the lenient decoder drops: stray trailing bits.
+	if (decoded.toString("base64url") !== value) {
+		return `the \`${name}\` key is not canonical base64url`;
+	}
+	return decoded;
+}
+
+function p256dhProblem(value: unknown): string | null {
+	const point = decodeKey(value, "p256dh", P256DH_BYTES);
+	if (typeof point === "string") return point;
+	if (point[0] !== 0x04) {
+		return "the `p256dh` key is not an uncompressed point";
+	}
+	// The payload is encrypted against this point; one off the curve fails
+	// every push, and would sit in the store failing forever.
+	try {
+		createPublicKey({
+			key: {
+				kty: "EC",
+				crv: "P-256",
+				x: point.subarray(1, 33).toString("base64url"),
+				y: point.subarray(33).toString("base64url"),
+			},
+			format: "jwk",
+		});
+	} catch {
+		return "the `p256dh` key is not a point on P-256";
+	}
 	return null;
+}
+
+function authProblem(value: unknown): string | null {
+	const secret = decodeKey(value, "auth", AUTH_BYTES);
+	return typeof secret === "string" ? secret : null;
+}
+
+/** What makes the encryption keys unusable, or null when nothing does. */
+export function keysProblem(p256dh: unknown, auth: unknown): string | null {
+	return p256dhProblem(p256dh) ?? authProblem(auth);
 }
 
 /** What is wrong with a subscription, or null when nothing is. */
@@ -81,10 +123,7 @@ export function subscriptionProblem(
 			return "the `expirationTime` is neither null nor a finite, non-negative number";
 		}
 	}
-	return (
-		base64UrlProblem(p256dh, "p256dh", P256DH_LENGTH_RANGE) ??
-		base64UrlProblem(auth, "auth", AUTH_LENGTH_RANGE)
-	);
+	return keysProblem(p256dh, auth);
 }
 
 /** The same check, as a predicate, for callers that go on to use the values. */

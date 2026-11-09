@@ -17,7 +17,7 @@
  * peer dependency intact while letting the package compile in isolation.
  */
 
-import type { NovaConfig } from "./config.js";
+import type { NovaConfig, NovaRouteMiddleware } from "./config.js";
 import { NovaError } from "./errors.js";
 import { Nova } from "./Nova.js";
 import {
@@ -52,6 +52,7 @@ interface ConfigStoreLike {
 
 interface RouteBuilderLike {
 	guard(...guards: string[]): RouteBuilderLike;
+	use(...middleware: NovaRouteMiddleware[]): RouteBuilderLike;
 }
 
 interface RouterLike {
@@ -206,7 +207,10 @@ export default class NovaProvider {
 		const store = await this.#app.container.resolve<SubscriptionStore>(
 			SUBSCRIPTION_STORE_TOKEN,
 		);
-		const controller = new SubscribeController(store, this.#config.delivery);
+		const controller = new SubscribeController(store, {
+			...this.#config.delivery,
+			maxSubscriptionsPerUser: this.#config.maxSubscriptionsPerUser,
+		});
 
 		const route = router.post(path, async (ctx: SubscribeContext) => {
 			await controller.handle(ctx);
@@ -216,6 +220,8 @@ export default class NovaProvider {
 		if (typeof guard === "string" && guard.length > 0) {
 			route.guard(guard);
 		}
+		const middleware = this.#config.middleware ?? [];
+		if (middleware.length > 0) route.use(...middleware);
 	}
 
 	async shutdown(): Promise<void> {

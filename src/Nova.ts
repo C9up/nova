@@ -93,6 +93,11 @@ export interface NovaDeliveryOptions extends PushTargetPolicy {
 	 */
 	timeout?: number;
 	/**
+	 * Requests `pushToUser` keeps in flight at once. Default 10. Every
+	 * subscription is still pushed to; the rest wait for a free slot.
+	 */
+	concurrency?: number;
+	/**
 	 * The client requests go through. Default: `HttpClient` from
 	 * `@c9up/ream/http-client`, which refuses non-public addresses. Pass one
 	 * to route pushes through a proxy, or `fakeHttp()` in tests.
@@ -104,6 +109,7 @@ export type { PushHttpClient } from "./_internal/http.js";
 export type { PushTargetPolicy } from "./_internal/push-services.js";
 
 const DEFAULT_TIMEOUT = 10_000;
+const DEFAULT_CONCURRENCY = 10;
 /**
  * A push service answers with an empty body or a small problem document
  * (RFC 8030 §5, §7); nothing here reads it. The cap only stops an endpoint
@@ -124,6 +130,7 @@ export class Nova {
 	#rawVapid: NovaVapidConfig | undefined;
 	#validatedVapid: NovaVapidConfig | undefined;
 	readonly #timeout: number;
+	readonly #concurrency: number;
 	readonly #targets: ResolvedPushTargetPolicy;
 	#http: Promise<PushHttpClient> | undefined;
 
@@ -135,6 +142,11 @@ export class Nova {
 		this.#store = store;
 		this.#rawVapid = vapidConfig;
 		this.#timeout = resolveTimeout(delivery.timeout);
+		this.#concurrency = positiveInteger(
+			delivery.concurrency,
+			DEFAULT_CONCURRENCY,
+			"concurrency",
+		);
 		this.#targets = resolvePushTargetPolicy(delivery);
 		if (delivery.http !== undefined) {
 			this.#http = Promise.resolve(delivery.http);
@@ -266,8 +278,10 @@ export class Nova {
 		// failure, JSON.stringify on a non-serializable payload, etc.) MUST NOT
 		// abort the fan-out for the others. Promise.allSettled + map-rejections-to
 		// -PushResult preserves the documented "every subscription gets a result".
-		const settled = await Promise.allSettled(
-			subs.map((sub) => this.push(sub, payload, options)),
+		// Bounded: one account must not turn a notification into hundreds of
+		// simultaneous TLS handshakes and encryptions.
+		const settled = await settleLimited(subs, this.#concurrency, (sub) =>
+			this.push(sub, payload, options),
 		);
 		return settled.map((outcome, idx) => {
 			if (outcome.status === "fulfilled") return outcome.value;
@@ -409,13 +423,46 @@ function refused(endpoint: string, why: string): PushResult {
 }
 
 function resolveTimeout(input: number | undefined): number {
-	if (input === undefined) return DEFAULT_TIMEOUT;
+	return positiveInteger(input, DEFAULT_TIMEOUT, "timeout");
+}
+
+function positiveInteger(
+	input: number | undefined,
+	fallback: number,
+	option: string,
+): number {
+	if (input === undefined) return fallback;
 	if (!Number.isSafeInteger(input) || input <= 0) {
 		throw new TypeError(
-			`[nova] invalid delivery option \`timeout\`: expected a positive integer (ms), got ${String(input)}`,
+			`[nova] invalid delivery option \`${option}\`: expected a positive integer, got ${String(input)}`,
 		);
 	}
 	return input;
+}
+
+/** `Promise.allSettled` over `items`, with at most `limit` running at once. */
+async function settleLimited<T, R>(
+	items: readonly T[],
+	limit: number,
+	run: (item: T) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+	const settled: PromiseSettledResult<R>[] = new Array(items.length);
+	let next = 0;
+	const worker = async (): Promise<void> => {
+		while (next < items.length) {
+			const index = next++;
+			const item = items[index];
+			if (item === undefined) continue;
+			try {
+				settled[index] = { status: "fulfilled", value: await run(item) };
+			} catch (reason) {
+				settled[index] = { status: "rejected", reason };
+			}
+		}
+	};
+	const workers = Array.from({ length: Math.min(limit, items.length) }, worker);
+	await Promise.all(workers);
+	return settled;
 }
 
 function resolveTtl(input: number | undefined): number {

@@ -63,6 +63,20 @@ stores the browser's subscription against the authenticated user.
 
 `vapid` is only needed to SEND: the subscription endpoint works without it.
 
+A user keeps at most `maxSubscriptionsPerUser` subscriptions (default 20): a new one past the cap
+drops that user's oldest. Put a rate limit on the route with `middleware`, so one account cannot
+write subscriptions as fast as it can post:
+
+```ts
+import { throttle } from '#start/limiter'   // limiter.define(...) from @c9up/blackhole/limiter
+
+export default defineConfig({
+  // ...
+  maxSubscriptionsPerUser: 20,
+  middleware: [throttle],
+})
+```
+
 ## Send a notification
 
 ```ts
@@ -113,6 +127,7 @@ export default defineConfig({
   // ...
   delivery: {
     timeout: 10_000,   // ms for one push request, connection to answer (default 10 000)
+    concurrency: 10,   // requests pushToUser keeps in flight at once (default 10)
     pushServices: [...DEFAULT_PUSH_SERVICES, 'push.example.net'],   // replaces the list
     allowHosts: ['localhost:4399'],   // development only: a push service on this machine
   },

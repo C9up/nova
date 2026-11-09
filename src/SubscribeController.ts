@@ -39,18 +39,38 @@ export interface SubscribeContext {
 	auth?: { user?: { id?: unknown } };
 }
 
+export interface SubscribeOptions extends PushTargetPolicy {
+	/**
+	 * Subscriptions one user may hold. Default 20. Past it, the oldest are
+	 * dropped as a new one arrives: a user has a handful of devices, and every
+	 * subscription is a request the server sends on each notification.
+	 */
+	maxSubscriptionsPerUser?: number;
+}
+
+const DEFAULT_MAX_SUBSCRIPTIONS_PER_USER = 20;
+
 export class SubscribeController {
 	#store: SubscriptionStore;
 	readonly #targets: ResolvedPushTargetPolicy;
+	readonly #maxPerUser: number;
 
 	/**
-	 * @param targets The push services an endpoint may point at — the same
+	 * @param options The push services an endpoint may point at — the same
 	 * `delivery` options `Nova` sends with, so what is accepted here is what
-	 * can be delivered.
+	 * can be delivered — and how many subscriptions a user may hold.
 	 */
-	constructor(store: SubscriptionStore, targets: PushTargetPolicy = {}) {
+	constructor(store: SubscriptionStore, options: SubscribeOptions = {}) {
 		this.#store = store;
-		this.#targets = resolvePushTargetPolicy(targets);
+		this.#targets = resolvePushTargetPolicy(options);
+		const max =
+			options.maxSubscriptionsPerUser ?? DEFAULT_MAX_SUBSCRIPTIONS_PER_USER;
+		if (!Number.isSafeInteger(max) || max < 1) {
+			throw new TypeError(
+				`[nova] invalid option \`maxSubscriptionsPerUser\`: expected a positive integer, got ${String(max)}`,
+			);
+		}
+		this.#maxPerUser = max;
 	}
 
 	async handle(ctx: SubscribeContext): Promise<void> {
@@ -107,9 +127,23 @@ export class SubscribeController {
 			}
 			throw error;
 		}
+		await this.#trim(userId, subscription.endpoint);
 		ctx.response
 			.status(201)
 			.json({ ok: true, endpoint: subscription.endpoint });
+	}
+
+	/** Drop the user's oldest subscriptions past the cap — never the one just saved. */
+	async #trim(userId: string, kept: string): Promise<void> {
+		const held = await this.#store.listByUser(userId);
+		let excess = held.length - this.#maxPerUser;
+		// Stores list oldest first.
+		for (const { endpoint } of held) {
+			if (excess <= 0) break;
+			if (endpoint === kept) continue;
+			await this.#store.delete(endpoint);
+			excess -= 1;
+		}
 	}
 }
 

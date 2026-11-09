@@ -696,3 +696,84 @@ describe("Nova > pushToUser() — user ids", () => {
 		await expect(nova.pushToUser(id, PAYLOAD)).rejects.toThrow(/not a user id/);
 	});
 });
+
+describe("Nova > pushToUser() — bounded fan-out", () => {
+	function countingClient(): {
+		client: {
+			request: () => Promise<{ status: number; header: () => undefined }>;
+		};
+		peak: () => number;
+		sent: () => number;
+	} {
+		let inFlight = 0;
+		let peak = 0;
+		let sent = 0;
+		return {
+			client: {
+				request: async () => {
+					inFlight += 1;
+					sent += 1;
+					peak = Math.max(peak, inFlight);
+					await new Promise((resolve) => setTimeout(resolve, 5));
+					inFlight -= 1;
+					return { status: 201, header: () => undefined };
+				},
+			},
+			peak: () => peak,
+			sent: () => sent,
+		};
+	}
+
+	async function storeWith(count: number): Promise<MemorySubscriptionDriver> {
+		const store = new MemorySubscriptionDriver();
+		for (let n = 0; n < count; n++) {
+			await store.save("u1", {
+				...SUB_A,
+				endpoint: `https://fcm.googleapis.com/fcm/send/fan-${n}`,
+			});
+		}
+		return store;
+	}
+
+	it("never has more than `concurrency` requests in flight, and sends them all", async () => {
+		const counting = countingClient();
+		const nova = new Nova(await storeWith(12), VALID_VAPID, {
+			http: counting.client,
+			concurrency: 3,
+		});
+		const results = await nova.pushToUser("u1", PAYLOAD);
+		expect(results).toHaveLength(12);
+		expect(results.every((r) => r.ok)).toBe(true);
+		expect(counting.sent()).toBe(12);
+		expect(counting.peak()).toBe(3);
+	});
+
+	it("keeps results in subscription order", async () => {
+		const counting = countingClient();
+		const store = await storeWith(7);
+		const nova = new Nova(store, VALID_VAPID, {
+			http: counting.client,
+			concurrency: 2,
+		});
+		const results = await nova.pushToUser("u1", PAYLOAD);
+		expect(results.map((r) => r.endpoint)).toEqual(
+			(await store.listByUser("u1")).map((s) => s.endpoint),
+		);
+	});
+
+	it("defaults to 10 in flight", async () => {
+		const counting = countingClient();
+		const nova = new Nova(await storeWith(25), VALID_VAPID, {
+			http: counting.client,
+		});
+		await nova.pushToUser("u1", PAYLOAD);
+		expect(counting.peak()).toBe(10);
+	});
+
+	it.each([0, -1, 2.5, Number.NaN])("refuses concurrency %s", (concurrency) => {
+		expect(
+			() =>
+				new Nova(new MemorySubscriptionDriver(), VALID_VAPID, { concurrency }),
+		).toThrow(/concurrency/);
+	});
+});

@@ -25,6 +25,7 @@ import { realAuth, realP256dh } from "../__helpers__/subscription.js";
 interface RecordedRoute {
 	path: string;
 	guards: string[];
+	middleware: unknown[];
 	handler: (ctx: unknown) => unknown;
 }
 
@@ -32,11 +33,20 @@ function makeRouter() {
 	const routes: RecordedRoute[] = [];
 	const router = {
 		post(path: string, handler: (ctx: unknown) => unknown) {
-			const recorded: RecordedRoute = { path, guards: [], handler };
+			const recorded: RecordedRoute = {
+				path,
+				guards: [],
+				middleware: [],
+				handler,
+			};
 			routes.push(recorded);
 			return {
 				guard(...guards: string[]) {
 					recorded.guards.push(...guards);
+					return this;
+				},
+				use(...middleware: unknown[]) {
+					recorded.middleware.push(...middleware);
 					return this;
 				},
 			};
@@ -502,5 +512,40 @@ describe("nova > subscribe route — an endpoint another user holds", () => {
 		expect((await post(controller, "second", VALID_BODY)).status).toBe(201);
 		expect(await store.listByUser("first")).toEqual([]);
 		expect(await store.listByUser("second")).toEqual([VALID_BODY]);
+	});
+});
+
+describe("nova > subscribe route — abuse limits from the config", () => {
+	it("puts config.middleware on the route", async () => {
+		const { router, routes } = makeRouter();
+		const throttle = async (_ctx: never, next: () => Promise<void>) => {
+			await next();
+		};
+		const provider = new NovaProvider(
+			makeApp({ router, novaConfig: { middleware: [throttle] } }),
+		);
+		provider.register();
+		await provider.start();
+		expect(routes[0]?.middleware).toEqual([throttle]);
+	});
+
+	it("applies config.maxSubscriptionsPerUser", async () => {
+		const { router, routes } = makeRouter();
+		const store = new MemorySubscriptionDriver();
+		const provider = new NovaProvider(
+			makeApp({ router, store, novaConfig: { maxSubscriptionsPerUser: 2 } }),
+		);
+		provider.register();
+		await provider.start();
+		const handler = routes[0]?.handler;
+		if (!handler) throw new Error("handler not captured");
+		for (const n of [1, 2, 3]) {
+			const { ctx } = makeCtx("user-1", {
+				...VALID_BODY,
+				endpoint: `${VALID_BODY.endpoint}-${n}`,
+			});
+			await handler(ctx);
+		}
+		expect(await store.listByUser("user-1")).toHaveLength(2);
 	});
 });

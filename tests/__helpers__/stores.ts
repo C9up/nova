@@ -59,8 +59,9 @@ export class FakeRedis implements SubscriptionRedisClient {
 		return removed;
 	}
 
+	/** A Redis set has no order: answered newest first, so no test leans on one. */
 	async smembers(key: string): Promise<string[]> {
-		return [...(this.sets.get(key) ?? [])];
+		return [...(this.sets.get(key) ?? [])].reverse();
 	}
 }
 

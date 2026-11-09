@@ -70,6 +70,12 @@ interface StoredSubscription {
 	expirationTime: number | null;
 	p256dh: string;
 	auth: string;
+	/**
+	 * When it was stored, in ms. A set has no order, and `listByUser` answers
+	 * oldest first like the other stores. Records written before it existed
+	 * read as 0, the oldest.
+	 */
+	createdAt: number;
 }
 
 export class RedisSubscriptionStore implements SubscriptionStore {
@@ -163,6 +169,7 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 			expirationTime: subscription.expirationTime,
 			p256dh: subscription.keys.p256dh,
 			auth: subscription.keys.auth,
+			createdAt: nextStamp(),
 		};
 		await (await this.#redis()).set(key, JSON.stringify(stored));
 		await (await this.#redis()).sadd(
@@ -172,7 +179,7 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 	}
 
 	/**
-	 * Every subscription `userId` has registered.
+	 * Every subscription `userId` has registered, oldest first.
 	 *
 	 * A member whose record is gone is dropped from the set on the way past:
 	 * the two keys are written separately, so a process that died between them
@@ -182,7 +189,7 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 		const endpoints = await (await this.#redis()).smembers(
 			this.#userKey(userId),
 		);
-		const found: PushSubscription[] = [];
+		const found: Array<PushSubscription & { createdAt: number }> = [];
 		const dangling: string[] = [];
 
 		for (const endpoint of endpoints) {
@@ -195,13 +202,19 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 				endpoint,
 				expirationTime: stored.expirationTime,
 				keys: { p256dh: stored.p256dh, auth: stored.auth },
+				createdAt: stored.createdAt,
 			});
 		}
 
 		if (dangling.length > 0) {
 			await (await this.#redis()).srem(this.#userKey(userId), ...dangling);
 		}
-		return found;
+		found.sort((a, b) => a.createdAt - b.createdAt);
+		return found.map(({ endpoint, expirationTime, keys }) => ({
+			endpoint,
+			expirationTime,
+			keys,
+		}));
 	}
 
 	/** Forget one subscription, whoever owns it. */
@@ -236,6 +249,17 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 	}
 }
 
+let lastStamp = 0;
+
+/**
+ * Now, in ms, but never twice the same in this process: two subscribes in
+ * one millisecond would otherwise tie, and the order between them is lost.
+ */
+function nextStamp(): number {
+	lastStamp = Math.max(Date.now(), lastStamp + 1);
+	return lastStamp;
+}
+
 /**
  * One stored record, or undefined when it is not usable.
  *
@@ -268,10 +292,17 @@ function readRecord(
 	if (!isSubscriptionFields(fields)) return undefined;
 	// The guard narrows the fields, so the record is rebuilt from checked values
 	// rather than asserted into shape.
+	const createdAt =
+		"createdAt" in value &&
+		typeof value.createdAt === "number" &&
+		Number.isFinite(value.createdAt)
+			? value.createdAt
+			: 0;
 	return {
 		userId: value.userId,
 		expirationTime: fields.expirationTime,
 		p256dh: fields.p256dh,
 		auth: fields.auth,
+		createdAt,
 	};
 }

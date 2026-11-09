@@ -2,6 +2,7 @@ export { DEFAULT_PUSH_SERVICES } from "./_internal/push-services.js";
 export {
 	defineConfig,
 	type NovaConfig,
+	type NovaRouteMiddleware,
 	type NovaVapidConfig,
 } from "./config.js";
 export { NovaError } from "./errors.js";

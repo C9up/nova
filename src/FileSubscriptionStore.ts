@@ -102,6 +102,9 @@ export class FileSubscriptionStore implements SubscriptionStore {
 				},
 				subscription.keys,
 			);
+			// Removed first so the re-added key moves to the end: insertion
+			// order is what `listByUser` reports as oldest first.
+			delete file.subscriptions[subscription.endpoint];
 			file.subscriptions[subscription.endpoint] = {
 				userId,
 				expirationTime: subscription.expirationTime,
@@ -111,6 +114,7 @@ export class FileSubscriptionStore implements SubscriptionStore {
 		});
 	}
 
+	/** Every subscription `userId` has registered, oldest first. */
 	async listByUser(userId: string): Promise<PushSubscription[]> {
 		const file = await this.#read();
 		return Object.entries(file.subscriptions)

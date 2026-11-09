@@ -38,9 +38,25 @@ export interface NovaConfig {
 	store?: SubscriptionStore;
 	/** VAPID identity. Required for `nova.push()`; subscription-side endpoints work without it. */
 	vapid?: NovaVapidConfig;
-	/** How push requests leave the server: deadline, outbound client. */
+	/** How push requests leave the server: deadline, push services, client. */
 	delivery?: NovaDeliveryOptions;
+	/**
+	 * Subscriptions one user may hold; the oldest go past it. Default 20.
+	 */
+	maxSubscriptionsPerUser?: number;
+	/**
+	 * Middleware run before the subscribe route's handler — a rate limit, so
+	 * one account cannot write subscriptions as fast as it can post:
+	 * `middleware: [throttle]` with a limiter from `@c9up/blackhole/limiter`.
+	 */
+	middleware?: NovaRouteMiddleware[];
 }
+
+/** A route middleware, as the router's `use()` takes it. */
+export type NovaRouteMiddleware = (
+	ctx: never,
+	next: () => Promise<void>,
+) => Promise<void> | void;
 
 export function defineConfig(config: NovaConfig): NovaConfig {
 	return config;

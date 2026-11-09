@@ -571,3 +571,46 @@ describe("Nova > push() — a subscription whose keys cannot be used", () => {
 		},
 	);
 });
+
+describe("Nova > push() — one aes128gcm record (RFC 8291 §4)", () => {
+	/** A payload whose JSON is exactly `bytes` long. */
+	function payloadOf(bytes: number, filler = "b"): PushPayload {
+		const frame = Buffer.byteLength(JSON.stringify({ title: "t", body: "" }));
+		const unit = Buffer.byteLength(filler);
+		return { title: "t", body: filler.repeat((bytes - frame) / unit) };
+	}
+
+	it("sends 3993 bytes of plaintext as a single 4096-byte record", async () => {
+		answer(201);
+		const { nova } = makeNova();
+		const payload = payloadOf(3993);
+		expect(Buffer.byteLength(JSON.stringify(payload))).toBe(3993);
+
+		const result = await nova.push(SUB_A, payload);
+
+		expect(result.ok).toBe(true);
+		expect(http.requests[0]?.body?.length).toBe(4096);
+		// The record size in the aes128gcm header (bytes 16..19).
+		expect(http.requests[0]?.body?.readUInt32BE(16)).toBe(4096);
+	});
+
+	it.each([
+		["one byte over", payloadOf(3994)],
+		["two-byte characters over the limit", payloadOf(3995, "é")],
+		["100 KB", payloadOf(100_023)],
+	])("refuses %s without a request", async (_label, payload) => {
+		answer(201);
+		const { nova } = makeNova();
+
+		const result = await nova.push(SUB_A, payload);
+
+		expect(result).toEqual({
+			ok: false,
+			status: 0,
+			endpoint: SUB_A.endpoint,
+			reason: "too-large",
+			cleaned: false,
+		});
+		expect(http.requests).toHaveLength(0);
+	});
+});

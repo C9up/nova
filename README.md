@@ -86,6 +86,10 @@ reached, does not answer in time or answers with more than 16 KiB comes back as
 `reason: 'server-error'` with `status: 0`. `pushToUser()` fans out and returns one result per device:
 a device that fails does not stop the others.
 
+A payload is sent as a single encrypted record, so its JSON may not exceed 3993 bytes
+(RFC 8291 §4). A larger one is not sent: it comes back as `reason: 'too-large'`, `status: 0`.
+Send an identifier and let the service worker fetch the rest.
+
 The endpoint is a URL the browser hands over, so the request is sent through the outbound client of
 `@c9up/ream/http-client`: it never connects to a private, loopback or link-local address, reads at
 most 16 KiB of the answer and gives up after the deadline.

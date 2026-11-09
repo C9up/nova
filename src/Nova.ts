@@ -103,6 +103,11 @@ const DEFAULT_TIMEOUT = 10_000;
  * from streaming into the server's memory.
  */
 const MAX_RESPONSE_BYTES = 16 * 1024;
+/**
+ * RFC 8291 §4: one record of at most 4096 octets, which leaves 3993 for the
+ * plaintext (86-octet header, 1 padding delimiter, 16-octet tag).
+ */
+const MAX_PLAINTEXT_BYTES = 3993;
 const DEFAULT_TTL = 60;
 const MAX_TOPIC_LENGTH = 32;
 const TOPIC_CHARS = /^[A-Za-z0-9_-]+$/;
@@ -163,9 +168,26 @@ export class Nova {
 		);
 		if (unusable !== null) return await this.#forget(endpoint, 0, unusable);
 
+		const plaintext = JSON.stringify(payload);
+		const size = Buffer.byteLength(plaintext);
+		if (size > MAX_PLAINTEXT_BYTES) {
+			// web-push would split it into several records, which RFC 8291 §4
+			// forbids: the push service answers 413, or the browser cannot decrypt.
+			console.warn(
+				`[nova] push to ${hostOf(endpoint)} not sent: the payload is ${size} bytes, over the ${MAX_PLAINTEXT_BYTES} one record holds`,
+			);
+			return {
+				ok: false,
+				status: 0,
+				endpoint,
+				reason: "too-large",
+				cleaned: false,
+			};
+		}
+
 		const request = webpush.generateRequestDetails(
 			subscription,
-			JSON.stringify(payload),
+			plaintext,
 			webpushOptions,
 		);
 		const headers: Record<string, string> = {};

@@ -10,19 +10,32 @@
 
 import { NovaError } from "./errors.js";
 import type { SubscriptionRedisClient } from "./RedisSubscriptionStore.js";
-import { quasarConnection as loadQuasarConnection } from "./vendor/quasarConnection.js";
+import {
+	hasCommands,
+	quasarConnection as loadQuasarConnection,
+} from "./vendor/quasarConnection.js";
 
 // The commands the store issues. A client missing one cannot serve it.
 const REQUIRED = ["get", "set", "del", "sadd", "srem", "smembers"] as const;
+
+/**
+ * The connection is handed over only once it carries every command above.
+ */
+function isSubscriptionRedisClient(
+	value: unknown,
+): value is SubscriptionRedisClient {
+	return hasCommands(value, REQUIRED);
+}
 
 /** The named connection, once it is known to carry what this package issues. */
 export async function quasarConnection(
 	name?: string,
 ): Promise<SubscriptionRedisClient> {
-	return loadQuasarConnection<SubscriptionRedisClient>({
+	return loadQuasarConnection({
 		pkg: "nova",
 		name,
 		required: REQUIRED,
+		isConnection: isSubscriptionRedisClient,
 		what: "the subscription store",
 		alternative: "or pass a client instead of a connection name",
 		raise: (reason, message, cause) =>

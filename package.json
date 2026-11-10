@@ -67,7 +67,7 @@
   "peerDependencies": {
     "@c9up/atlas": "^0.3.0",
     "@c9up/quasar": "^0.1.0 || ^0.2.0",
-    "@c9up/ream": "^0.2.26"
+    "@c9up/ream": "^0.2.29"
   },
   "dependencies": {
     "web-push": "^3.6.7"

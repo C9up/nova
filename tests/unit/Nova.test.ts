@@ -1,8 +1,3 @@
-import {
-	type FakeHttpClient,
-	fakeHttp,
-	HttpClientError,
-} from "@c9up/ream/http-client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Nova, type PushPayload } from "../../src/Nova.js";
 import {
@@ -10,6 +5,11 @@ import {
 	type PushSubscription,
 } from "../../src/SubscriptionStore.js";
 import { generateVapidKeys } from "../../src/vapid.js";
+import {
+	type FakePushHttp,
+	fakePushHttp,
+	transportError,
+} from "../__helpers__/http.js";
 
 // Real keys: the payload is encrypted for the subscription's p256dh, which has
 // to be a point on P-256 for that to work.
@@ -43,13 +43,12 @@ const PAYLOAD: PushPayload = {
 	url: "/news/1",
 };
 
-let http: FakeHttpClient;
+let http: FakePushHttp;
 let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
-	// Configured like the client Nova builds for itself.
-	http = fakeHttp({ maxRedirects: 0 });
+	http = fakePushHttp();
 	consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 	consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 });
@@ -240,7 +239,7 @@ describe("Nova > push() — error mapping", () => {
 				"POST",
 				() => true,
 				() => {
-					throw new HttpClientError(reason, SUB_A.endpoint, "boom");
+					throw transportError(reason, SUB_A.endpoint);
 				},
 			);
 			const { nova, store } = makeNova();
@@ -502,7 +501,7 @@ describe("Nova > push() — only push services are contacted", () => {
 			"POST",
 			() => true,
 			() => {
-				throw new HttpClientError("privateAddress", SUB_A.endpoint, "boom");
+				throw transportError("privateAddress", SUB_A.endpoint);
 			},
 		);
 		const { nova } = makeNova();

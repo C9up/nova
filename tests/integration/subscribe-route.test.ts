@@ -9,7 +9,6 @@
  * exactly the surface that a real `AppContext` would.
  */
 
-import { fakeHttp } from "@c9up/ream/http-client";
 import { describe, expect, it } from "vitest";
 import { Nova } from "../../src/Nova.js";
 import NovaProvider, { type NovaAppContext } from "../../src/NovaProvider.js";
@@ -21,6 +20,7 @@ import {
 } from "../../src/SubscriptionStore.js";
 import { generateVapidKeys } from "../../src/vapid.js";
 import { asRequested } from "../__helpers__/container.js";
+import { fakePushHttp } from "../__helpers__/http.js";
 import { realAuth, realP256dh } from "../__helpers__/subscription.js";
 
 interface RecordedRoute {
@@ -323,7 +323,7 @@ describe("nova > subscribe route (integration)", () => {
 	});
 
 	it("hands config.delivery to the Nova it binds", async () => {
-		const http = fakeHttp({ maxRedirects: 0 });
+		const http = fakePushHttp();
 		http.on("POST", () => true, { status: 201 });
 		const { router } = makeRouter();
 		const app = makeApp({
@@ -466,7 +466,7 @@ describe("nova > subscribe route — user ids", () => {
 	});
 
 	it("lets pushToUser take the same numeric id", async () => {
-		const http = fakeHttp({ maxRedirects: 0 });
+		const http = fakePushHttp();
 		http.on("POST", () => true, { status: 201 });
 		const store = new MemorySubscriptionDriver();
 		await controllerWith(store).handle(ctxFor({ id: 42 }).ctx);

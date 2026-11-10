@@ -2,13 +2,12 @@
  * Integration test — verifies that `nova.push()` produces a Web Push
  * Protocol-compliant outbound HTTP request (RFC 8030 / RFC 8291).
  *
- * Uses `nock` to intercept the outbound POST and assert on headers + body.
+ * A fake outbound client records the POST so its headers and body can be read.
  * Body is encrypted (AES-128-GCM via web-push's RFC 8188 aes128gcm path),
  * so we assert it is non-empty bytes that do NOT contain the plaintext.
  */
 
-import nock from "nock";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { NovaVapidConfig } from "../../src/config.js";
 import { Nova } from "../../src/Nova.js";
 import {
@@ -16,6 +15,7 @@ import {
 	type PushSubscription,
 } from "../../src/SubscriptionStore.js";
 import { generateVapidKeys } from "../../src/vapid.js";
+import { type FakePushHttp, fakePushHttp } from "../__helpers__/http.js";
 
 const ENDPOINT_HOST = "https://fcm.googleapis.com";
 const ENDPOINT_PATH = "/fcm/send/integration-test-token";
@@ -40,44 +40,31 @@ beforeAll(async () => {
 	};
 });
 
-beforeEach(() => {
-	nock.disableNetConnect();
-});
+let http: FakePushHttp;
 
-afterEach(() => {
-	nock.cleanAll();
-	nock.enableNetConnect();
+beforeEach(() => {
+	http = fakePushHttp();
 });
 
 describe("nova.push() — Web Push Protocol headers + body", () => {
 	it("sends a POST with aes128gcm encoding, vapid auth, and TTL header", async () => {
-		let capturedHeaders: Record<string, string | string[]> = {};
-		let capturedBody: Buffer | undefined;
+		http.on("POST", ENDPOINT, { status: 201 });
 
-		const scope = nock(ENDPOINT_HOST)
-			.post(ENDPOINT_PATH)
-			.reply(function (_uri, requestBody) {
-				capturedHeaders = this.req.headers;
-				// nock hands a binary body over as a latin1 string.
-				capturedBody =
-					typeof requestBody === "string"
-						? Buffer.from(requestBody, "binary")
-						: undefined;
-				return [201, "", {}];
-			});
-
-		const nova = new Nova(new MemorySubscriptionDriver(), VAPID);
+		const nova = new Nova(new MemorySubscriptionDriver(), VAPID, { http });
 		const result = await nova.push(SUB, { title: "ping", body: "pong" });
 
-		expect(scope.isDone()).toBe(true);
+		expect(http.requests).toHaveLength(1);
+		expect(http.requests[0]?.method).toBe("POST");
+		expect(http.requests[0]?.url).toBe(ENDPOINT);
 		expect(result).toEqual({ ok: true, status: 201, endpoint: ENDPOINT });
+		const capturedHeaders = http.requests[0]?.headers ?? {};
+		const capturedBody = http.requests[0]?.body;
 
 		expect(capturedHeaders["content-encoding"]).toBe("aes128gcm");
 		expect(capturedHeaders.ttl).toBe("60");
 
-		const auth = capturedHeaders.authorization;
-		expect(auth).toBeDefined();
-		const authStr = Array.isArray(auth) ? auth[0] : auth;
+		const authStr = capturedHeaders.authorization;
+		expect(authStr).toBeDefined();
 		expect(authStr).toMatch(/^vapid /);
 		expect(authStr).toMatch(/t=ey/); // JWT prefix (ES256 header is `eyJ...`)
 		expect(authStr).toMatch(/k=B/); // base64url-encoded public key starts with B (uncompressed P-256 0x04 prefix)
@@ -90,21 +77,16 @@ describe("nova.push() — Web Push Protocol headers + body", () => {
 	});
 
 	it("forwards urgency + topic + custom TTL when provided", async () => {
-		let capturedHeaders: Record<string, string | string[]> = {};
-		nock(ENDPOINT_HOST)
-			.post(ENDPOINT_PATH)
-			.reply(function () {
-				capturedHeaders = this.req.headers;
-				return [201, "", {}];
-			});
+		http.on("POST", ENDPOINT, { status: 201 });
 
-		const nova = new Nova(new MemorySubscriptionDriver(), VAPID);
+		const nova = new Nova(new MemorySubscriptionDriver(), VAPID, { http });
 		await nova.push(
 			SUB,
 			{ title: "high-priority" },
 			{ ttl: 3600, urgency: "high", topic: "alert" },
 		);
 
+		const capturedHeaders = http.requests[0]?.headers ?? {};
 		expect(capturedHeaders.ttl).toBe("3600");
 		expect(capturedHeaders.urgency).toBe("high");
 		expect(capturedHeaders.topic).toBe("alert");

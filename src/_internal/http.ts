@@ -75,34 +75,93 @@ export interface DefaultClientOptions {
 	allowHosts?: string[];
 }
 
+/** The options Nova builds the framework's client with. */
+export interface GuardedClientOptions {
+	maxRedirects: number;
+	userAgent: string;
+	allowHosts?: string[] | undefined;
+}
+
+/** What Nova needs from `@c9up/ream/http-client`: its client class. */
+export interface GuardedClientModule {
+	HttpClient: new (options: GuardedClientOptions) => unknown;
+}
+
+/** Imports a module by specifier; `import()` itself outside of tests. */
+export type ModuleLoader = (specifier: string) => Promise<unknown>;
+
+/**
+ * Held in a variable so neither the compiler nor a bundler resolves it ahead
+ * of time: the peer may be missing, or older than the release that added this
+ * entry point, and only the first push should find that out.
+ */
+const GUARDED_CLIENT_MODULE: string = "@c9up/ream/http-client";
+
+const importModule: ModuleLoader = (specifier) => import(specifier);
+
+function isGuardedClientModule(value: unknown): value is GuardedClientModule {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		typeof Reflect.get(value, "HttpClient") === "function"
+	);
+}
+
+function isPushHttpClient(value: unknown): value is PushHttpClient {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		typeof Reflect.get(value, "request") === "function"
+	);
+}
+
+function missingClient(detail: string, cause?: unknown): NovaError {
+	return new NovaError(
+		"E_NOVA_HTTP_CLIENT_MISSING",
+		`Sending a push needs the outbound HTTP client from @c9up/ream, ${detail}.`,
+		{
+			hint: "Install @c9up/ream (^0.2.29), or pass your own client as `http` in the Nova options.",
+			cause,
+		},
+	);
+}
+
 /**
  * The framework's guarded client, loaded on first push.
  *
  * Imported lazily because `@c9up/ream` is an optional peer: the stores, the
  * browser helpers and key generation work without it, and only sending needs
- * an outbound client.
+ * an outbound client. Without it — or with a copy that does not have the
+ * client — sending fails with `E_NOVA_HTTP_CLIENT_MISSING`; it never falls
+ * back to a transport that would reach private addresses.
  */
 export async function defaultHttpClient(
 	options: DefaultClientOptions,
+	load: ModuleLoader = importModule,
 ): Promise<PushHttpClient> {
-	let loaded: typeof import("@c9up/ream/http-client");
+	let loaded: unknown;
 	try {
-		loaded = await import("@c9up/ream/http-client");
+		loaded = await load(GUARDED_CLIENT_MODULE);
 	} catch (cause) {
-		throw new NovaError(
-			"E_NOVA_HTTP_CLIENT_MISSING",
-			"Sending a push needs the outbound HTTP client from @c9up/ream, which is not installed.",
-			{
-				hint: "Install @c9up/ream, or pass your own client as `http` in the Nova options.",
-				cause,
-			},
-		);
+		throw missingClient("which is not installed", cause);
 	}
-	return new loaded.HttpClient({
-		// A push service never redirects; following one would let an endpoint
-		// bounce the request to a host that was never checked as a push service.
-		maxRedirects: 0,
-		userAgent: "@c9up/nova",
-		allowHosts: options.allowHosts,
-	});
+	if (!isGuardedClientModule(loaded)) {
+		throw missingClient("but the installed copy does not export `HttpClient`");
+	}
+	let client: unknown;
+	try {
+		client = new loaded.HttpClient({
+			// A push service never redirects; following one would let an endpoint
+			// bounce the request to a host that was never checked as a push service.
+			maxRedirects: 0,
+			userAgent: "@c9up/nova",
+			allowHosts: options.allowHosts,
+		});
+	} catch (cause) {
+		throw missingClient("but the installed copy could not build one", cause);
+	}
+	if (!isPushHttpClient(client)) {
+		throw missingClient("but the installed copy built one without `request()`");
+	}
+	return client;
 }

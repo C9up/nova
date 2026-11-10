@@ -1,28 +1,13 @@
 /**
  * The push request is sent to a URL a browser — or an attacker posing as one —
  * handed to the server, so the server must bound what it reads back and how
- * long it waits. Neither web-push's own transport does: it buffers the whole
- * response into a string (a large enough body throws `Invalid string length`
- * from a stream listener, outside every promise, and kills the process) and it
- * has no deadline unless one is asked for.
+ * long it waits. Nova asks the outbound client for both bounds on every
+ * request and turns the client giving up into a PushResult rather than a
+ * throw. Enforcing the bounds on a real socket is the client's own contract,
+ * tested with it.
  */
 
-import { readFileSync } from "node:fs";
-import { createServer, type Server } from "node:https";
-import type { AddressInfo } from "node:net";
-import { getCACertificates, setDefaultCACertificates } from "node:tls";
-import { HttpClient } from "@c9up/ream/http-client";
-import nock from "nock";
-import {
-	afterAll,
-	afterEach,
-	beforeAll,
-	beforeEach,
-	describe,
-	expect,
-	it,
-	vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NovaVapidConfig } from "../../src/config.js";
 import { Nova } from "../../src/Nova.js";
 import {
@@ -30,19 +15,21 @@ import {
 	type PushSubscription,
 } from "../../src/SubscriptionStore.js";
 import { generateVapidKeys } from "../../src/vapid.js";
+import {
+	type FakePushHttp,
+	fakePushHttp,
+	transportError,
+} from "../__helpers__/http.js";
 
 const HOST = "https://fcm.googleapis.com";
-const SLOW_PATH = "/fcm/send/slow";
-const OK_PATH = "/fcm/send/fine";
+const SLOW = `${HOST}/fcm/send/slow`;
+const OK = `${HOST}/fcm/send/fine`;
 
-const TLS_DIR = new URL("./fixtures/tls/", import.meta.url);
-const CERT = readFileSync(new URL("cert.pem", TLS_DIR), "utf8");
-const KEY = readFileSync(new URL("key.pem", TLS_DIR), "utf8");
-const OFFERED = 64 * 1024 * 1024;
-
-let VAPID: NovaVapidConfig;
-let P256DH: string;
-const defaultCAs = getCACertificates("default");
+const VAPID: NovaVapidConfig = {
+	...generateVapidKeys(),
+	subject: "mailto:test@example.com",
+};
+const P256DH = generateVapidKeys().publicKey;
 
 function sub(endpoint: string): PushSubscription {
 	return {
@@ -52,189 +39,101 @@ function sub(endpoint: string): PushSubscription {
 	};
 }
 
-beforeAll(() => {
-	VAPID = { ...generateVapidKeys(), subject: "mailto:test@example.com" };
-	P256DH = generateVapidKeys().publicKey;
-	// The flood has to come from a real socket — a mocked one hands the whole
-	// body over whether the client is still reading or not.
-	setDefaultCACertificates([...defaultCAs, CERT]);
-});
-
-afterAll(() => {
-	setDefaultCACertificates(defaultCAs);
-});
+let http: FakePushHttp;
 
 beforeEach(() => {
+	http = fakePushHttp();
 	vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 afterEach(() => {
-	nock.cleanAll();
-	nock.enableNetConnect();
 	vi.restoreAllMocks();
 });
 
-interface Flood {
-	url: string;
-	/** Bytes the server managed to hand to the socket. */
-	written(): number;
-	/** Resolves when the client has hung up. */
-	hungUp: Promise<void>;
-	close(): Promise<void>;
-}
-
-/** An HTTPS endpoint that answers `status` and streams 64 MiB unless stopped. */
-async function flood(
-	status: number,
-	headers: Record<string, string> = {},
-): Promise<Flood> {
-	let written = 0;
-	let hungUp: () => void = () => {};
-	const hangUp = new Promise<void>((resolve) => {
-		hungUp = resolve;
+/** An endpoint that stays silent until the request's own deadline passes. */
+function silentUntilDeadline(url: string): void {
+	http.on("POST", url, async (request) => {
+		await new Promise((resolve) => setTimeout(resolve, request.timeout));
+		throw transportError("timedOut", url);
 	});
-	const chunk = Buffer.alloc(64 * 1024, 0x61);
-	const server: Server = createServer({ cert: CERT, key: KEY }, (req, res) => {
-		req.resume();
-		res.on("close", () => hungUp());
-		res.writeHead(status, headers);
-		const pump = (): void => {
-			while (written < OFFERED && !res.destroyed) {
-				written += chunk.length;
-				if (!res.write(chunk)) {
-					res.once("drain", pump);
-					return;
-				}
-			}
-			if (!res.destroyed) res.end();
-		};
-		pump();
-	});
-	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-	const { port } = addressOf(server);
-	return {
-		url: `https://127.0.0.1:${port}/push/flood`,
-		written: () => written,
-		hungUp: hangUp,
-		close: () =>
-			new Promise<void>((resolve) => {
-				server.closeAllConnections();
-				server.close(() => resolve());
-			}),
-	};
-}
-
-function addressOf(server: Server): AddressInfo {
-	const address = server.address();
-	if (address === null || typeof address === "string") {
-		throw new Error("the test server has no TCP address");
-	}
-	return address;
-}
-
-/** The real guarded client, with the loopback test server exempted. */
-function clientFor(url: string): HttpClient {
-	return new HttpClient({ allowHosts: [new URL(url).host], maxRedirects: 0 });
 }
 
 describe("nova.push() — response size is bounded", () => {
-	it.each([500, 201])(
-		"hangs up on an endless %i body and answers a PushResult",
-		async (status) => {
-			const server = await flood(status);
-			try {
-				const nova = new Nova(new MemorySubscriptionDriver(), VAPID, {
-					http: clientFor(server.url),
-					allowHosts: [new URL(server.url).host],
-				});
-				const result = await nova.push(sub(server.url), { title: "x" });
+	it("caps every response at 16 KiB", async () => {
+		http.on("POST", OK, { status: 201 });
+		const nova = new Nova(new MemorySubscriptionDriver(), VAPID, { http });
+		await nova.push(sub(OK), { title: "x" });
+		expect(http.requests[0]?.maxResponseBytes).toBe(16 * 1024);
+	});
 
-				expect(result).toEqual({
-					ok: false,
-					status: 0,
-					endpoint: server.url,
-					reason: "server-error",
-					cleaned: false,
-				});
-				await server.hungUp;
-				// What got out is socket buffering, not the 64 MiB on offer.
-				expect(server.written()).toBeLessThan(OFFERED / 4);
-			} finally {
-				await server.close();
-			}
-		},
-		10_000,
-	);
-
-	it("hangs up on a declared content-length over the cap", async () => {
-		const server = await flood(201, {
-			"content-length": String(OFFERED),
+	it("answers a PushResult when the client hangs up on an oversized body", async () => {
+		http.on("POST", OK, () => {
+			throw transportError("tooLarge", OK);
 		});
-		try {
-			const nova = new Nova(new MemorySubscriptionDriver(), VAPID, {
-				http: clientFor(server.url),
-				allowHosts: [new URL(server.url).host],
-			});
-			const result = await nova.push(sub(server.url), { title: "x" });
-
-			expect(result).toMatchObject({
-				ok: false,
-				status: 0,
-				reason: "server-error",
-			});
-			await server.hungUp;
-			expect(server.written()).toBeLessThan(OFFERED / 4);
-		} finally {
-			await server.close();
-		}
-	}, 10_000);
+		const nova = new Nova(new MemorySubscriptionDriver(), VAPID, { http });
+		expect(await nova.push(sub(OK), { title: "x" })).toEqual({
+			ok: false,
+			status: 0,
+			endpoint: OK,
+			reason: "server-error",
+			cleaned: false,
+		});
+	});
 });
 
 describe("nova.push() — every request has a deadline", () => {
-	it("answers server-error, status 0, once the timeout passes", async () => {
-		nock.disableNetConnect();
-		nock(HOST).post(SLOW_PATH).delay(10_000).reply(201, "");
+	it("defaults the deadline to 10 seconds", async () => {
+		http.on("POST", OK, { status: 201 });
+		const nova = new Nova(new MemorySubscriptionDriver(), VAPID, { http });
+		await nova.push(sub(OK), { title: "x" });
+		expect(http.requests[0]?.timeout).toBe(10_000);
+	});
 
+	it("answers server-error, status 0, once the timeout passes", async () => {
+		silentUntilDeadline(SLOW);
 		const nova = new Nova(new MemorySubscriptionDriver(), VAPID, {
+			http,
 			timeout: 300,
 		});
 		const started = Date.now();
-		const result = await nova.push(sub(`${HOST}${SLOW_PATH}`), { title: "x" });
+		const result = await nova.push(sub(SLOW), { title: "x" });
 
+		expect(http.requests[0]?.timeout).toBe(300);
 		expect(Date.now() - started).toBeLessThan(5_000);
 		expect(result).toEqual({
 			ok: false,
 			status: 0,
-			endpoint: `${HOST}${SLOW_PATH}`,
+			endpoint: SLOW,
 			reason: "server-error",
 			cleaned: false,
 		});
-	}, 15_000);
+	});
 
 	it("a silent endpoint does not hold back the rest of the fan-out", async () => {
-		nock.disableNetConnect();
-		nock(HOST).post(SLOW_PATH).delay(10_000).reply(201, "");
-		nock(HOST).post(OK_PATH).reply(201, "");
+		silentUntilDeadline(SLOW);
+		http.on("POST", OK, { status: 201 });
 
 		const store = new MemorySubscriptionDriver();
-		await store.save("u1", sub(`${HOST}${SLOW_PATH}`));
-		await store.save("u1", sub(`${HOST}${OK_PATH}`));
-		const nova = new Nova(store, VAPID, { timeout: 2_000 });
+		await store.save("u1", sub(SLOW));
+		await store.save("u1", sub(OK));
+		const nova = new Nova(store, VAPID, { http, timeout: 300 });
 
 		const results = await nova.pushToUser("u1", { title: "x" });
 
 		expect(results).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
-					endpoint: `${HOST}${SLOW_PATH}`,
+					endpoint: SLOW,
 					ok: false,
 					status: 0,
 					reason: "server-error",
 				}),
-				{ ok: true, status: 201, endpoint: `${HOST}${OK_PATH}` },
+				{ ok: true, status: 201, endpoint: OK },
 			]),
 		);
-	}, 15_000);
+		// The silent one keeps its subscription: no answer is not a 404/410.
+		expect(await store.listByUser("u1")).toHaveLength(2);
+	});
 
 	it("refuses a timeout that is not a positive integer", () => {
 		for (const timeout of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {

@@ -4,8 +4,7 @@
  * caller's bucket doesn't grow unboundedly with dead subscriptions.
  */
 
-import nock from "nock";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { NovaVapidConfig } from "../../src/config.js";
 import { Nova } from "../../src/Nova.js";
 import {
@@ -13,6 +12,7 @@ import {
 	type PushSubscription,
 } from "../../src/SubscriptionStore.js";
 import { generateVapidKeys } from "../../src/vapid.js";
+import { type FakePushHttp, fakePushHttp } from "../__helpers__/http.js";
 
 const ENDPOINT_HOST = "https://updates.push.services.mozilla.com";
 const ENDPOINT_PATH = "/wpush/v2/cleanup-410-test";
@@ -34,24 +34,21 @@ beforeAll(() => {
 	};
 });
 
-beforeEach(() => {
-	nock.disableNetConnect();
-});
+let http: FakePushHttp;
 
-afterEach(() => {
-	nock.cleanAll();
-	nock.enableNetConnect();
+beforeEach(() => {
+	http = fakePushHttp();
 });
 
 describe("nova.push() — 410 cleanup contract", () => {
 	it("calls store.delete(endpoint) and returns cleaned=true on 410", async () => {
-		nock(ENDPOINT_HOST).post(ENDPOINT_PATH).reply(410, "");
+		http.on("POST", ENDPOINT, { status: 410 });
 
 		const store = new MemorySubscriptionDriver();
 		await store.save("u1", SUB);
 		expect(await store.listByUser("u1")).toHaveLength(1);
 
-		const nova = new Nova(store, VAPID);
+		const nova = new Nova(store, VAPID, { http });
 		const result = await nova.push(SUB, { title: "should-be-gone" });
 
 		expect(result).toEqual({
@@ -65,11 +62,11 @@ describe("nova.push() — 410 cleanup contract", () => {
 	});
 
 	it("calls store.delete(endpoint) and returns cleaned=true on 404", async () => {
-		nock(ENDPOINT_HOST).post(ENDPOINT_PATH).reply(404, "");
+		http.on("POST", ENDPOINT, { status: 404 });
 
 		const store = new MemorySubscriptionDriver();
 		await store.save("u1", SUB);
-		const nova = new Nova(store, VAPID);
+		const nova = new Nova(store, VAPID, { http });
 		const result = await nova.push(SUB, { title: "ditto" });
 
 		expect(result).toMatchObject({
@@ -82,11 +79,11 @@ describe("nova.push() — 410 cleanup contract", () => {
 	});
 
 	it("does NOT cleanup on non-gone failures (e.g., 429)", async () => {
-		nock(ENDPOINT_HOST).post(ENDPOINT_PATH).reply(429, "rate-limited");
+		http.on("POST", ENDPOINT, { status: 429 });
 
 		const store = new MemorySubscriptionDriver();
 		await store.save("u1", SUB);
-		const nova = new Nova(store, VAPID);
+		const nova = new Nova(store, VAPID, { http });
 		const result = await nova.push(SUB, { title: "too-fast" });
 
 		expect(result).toMatchObject({

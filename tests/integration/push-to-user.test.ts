@@ -4,8 +4,7 @@
  * automatic cleanup of stale subscriptions during the fan-out.
  */
 
-import nock from "nock";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { NovaVapidConfig } from "../../src/config.js";
 import { Nova } from "../../src/Nova.js";
 import {
@@ -13,6 +12,7 @@ import {
 	type PushSubscription,
 } from "../../src/SubscriptionStore.js";
 import { generateVapidKeys } from "../../src/vapid.js";
+import { type FakePushHttp, fakePushHttp } from "../__helpers__/http.js";
 
 const HOST_FCM = "https://fcm.googleapis.com";
 const HOST_MOZ = "https://updates.push.services.mozilla.com";
@@ -45,32 +45,29 @@ function mkSub(endpoint: string, p256dh: string): PushSubscription {
 	};
 }
 
-beforeEach(() => {
-	nock.disableNetConnect();
-});
+let http: FakePushHttp;
 
-afterEach(() => {
-	nock.cleanAll();
-	nock.enableNetConnect();
+beforeEach(() => {
+	http = fakePushHttp();
 });
 
 describe("nova.pushToUser() — multi-device fan-out", () => {
 	it("returns [] when the user has no subscriptions", async () => {
-		const nova = new Nova(new MemorySubscriptionDriver(), VAPID);
+		const nova = new Nova(new MemorySubscriptionDriver(), VAPID, { http });
 		expect(await nova.pushToUser("nobody", { title: "x" })).toEqual([]);
 	});
 
 	it("pushes to every subscription and returns all results", async () => {
-		nock(HOST_FCM).post(PATH_FCM).reply(201, "");
-		nock(HOST_MOZ).post(PATH_MOZ).reply(201, "");
-		nock(HOST_APN).post(PATH_APN).reply(201, "");
+		http.on("POST", `${HOST_FCM}${PATH_FCM}`, { status: 201 });
+		http.on("POST", `${HOST_MOZ}${PATH_MOZ}`, { status: 201 });
+		http.on("POST", `${HOST_APN}${PATH_APN}`, { status: 201 });
 
 		const store = new MemorySubscriptionDriver();
 		await store.save("u1", SUB_FCM);
 		await store.save("u1", SUB_MOZ);
 		await store.save("u1", SUB_APN);
 
-		const nova = new Nova(store, VAPID);
+		const nova = new Nova(store, VAPID, { http });
 		const results = await nova.pushToUser("u1", { title: "broadcast" });
 
 		expect(results).toHaveLength(3);
@@ -78,16 +75,16 @@ describe("nova.pushToUser() — multi-device fan-out", () => {
 	});
 
 	it("isolates failures: 410 cleans only the gone sub, others succeed", async () => {
-		nock(HOST_FCM).post(PATH_FCM).reply(201, ""); // ok
-		nock(HOST_MOZ).post(PATH_MOZ).reply(410, ""); // gone — should clean
-		nock(HOST_APN).post(PATH_APN).reply(201, ""); // ok
+		http.on("POST", `${HOST_FCM}${PATH_FCM}`, { status: 201 }); // ok
+		http.on("POST", `${HOST_MOZ}${PATH_MOZ}`, { status: 410 }); // gone — should clean
+		http.on("POST", `${HOST_APN}${PATH_APN}`, { status: 201 }); // ok
 
 		const store = new MemorySubscriptionDriver();
 		await store.save("u1", SUB_FCM);
 		await store.save("u1", SUB_MOZ);
 		await store.save("u1", SUB_APN);
 
-		const nova = new Nova(store, VAPID);
+		const nova = new Nova(store, VAPID, { http });
 		const results = await nova.pushToUser("u1", { title: "fan-out" });
 
 		expect(results).toHaveLength(3);
@@ -108,14 +105,14 @@ describe("nova.pushToUser() — multi-device fan-out", () => {
 	});
 
 	it("isolates failures: mixed 5xx + 200 — neither cleaned", async () => {
-		nock(HOST_FCM).post(PATH_FCM).reply(503, "down");
-		nock(HOST_MOZ).post(PATH_MOZ).reply(201, "");
+		http.on("POST", `${HOST_FCM}${PATH_FCM}`, { status: 503 });
+		http.on("POST", `${HOST_MOZ}${PATH_MOZ}`, { status: 201 });
 
 		const store = new MemorySubscriptionDriver();
 		await store.save("u1", SUB_FCM);
 		await store.save("u1", SUB_MOZ);
 
-		const nova = new Nova(store, VAPID);
+		const nova = new Nova(store, VAPID, { http });
 		const results = await nova.pushToUser("u1", { title: "x" });
 
 		expect(results).toHaveLength(2);

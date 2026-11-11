@@ -27,6 +27,7 @@
  */
 
 import { assertMayTakeOver } from "./_internal/ownership.js";
+import { overCap, perUserCap } from "./_internal/per-user-cap.js";
 import {
 	isSubscriptionFields,
 	subscriptionProblem,
@@ -34,6 +35,7 @@ import {
 import { NovaError } from "./errors.js";
 import type {
 	PushSubscription,
+	SaveSubscriptionOptions,
 	SubscriptionStore,
 } from "./SubscriptionStore.js";
 
@@ -82,6 +84,13 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 	readonly #source: SubscriptionRedisResolver;
 	#resolved: SubscriptionRedisClient | undefined;
 	readonly #prefix: string;
+	/**
+	 * Serialises this instance's writes. The contract is six plain commands —
+	 * what every client and a Redis Cluster serve — so a write is several round
+	 * trips, and two subscribes interleaving between them would each read a
+	 * state the other is changing. Queued, they run one after the other.
+	 */
+	#queue: Promise<unknown> = Promise.resolve();
 
 	constructor(
 		redis: SubscriptionRedisResolver,
@@ -125,7 +134,12 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 	 * notification for the old account would land on the new user's screen.
 	 * Same rule as the other two drivers.
 	 */
-	async save(userId: string, subscription: PushSubscription): Promise<void> {
+	async save(
+		userId: string,
+		subscription: PushSubscription,
+		options: SaveSubscriptionOptions = {},
+	): Promise<void> {
+		const max = perUserCap(options.maxPerUser);
 		// Checked on the way in as well as on the way out, so the strictness of
 		// #read can only ever be triggered by a hand-written key — never by this
 		// store writing a record it will later refuse to read, which would drop
@@ -146,6 +160,14 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 			);
 		}
 
+		await this.#serial(() => this.#write(userId, subscription, max));
+	}
+
+	async #write(
+		userId: string,
+		subscription: PushSubscription,
+		max: number,
+	): Promise<void> {
 		const previous = await this.#read(subscription.endpoint);
 		assertMayTakeOver(
 			subscription.endpoint,
@@ -176,6 +198,26 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 			this.#userKey(userId),
 			subscription.endpoint,
 		);
+
+		const held = (await this.#held(userId))
+			.sort(oldestFirst)
+			.map(({ endpoint }) => endpoint);
+		const evicted = overCap(held, max);
+		if (evicted.length > 0) {
+			await (await this.#redis()).srem(this.#userKey(userId), ...evicted);
+			await (await this.#redis()).del(
+				evicted.map((endpoint) => this.#subscriptionKey(endpoint)),
+			);
+		}
+	}
+
+	/** Run one write after the ones already queued, failures included. */
+	async #serial<T>(write: () => Promise<T>): Promise<T> {
+		const run = this.#queue.then(write);
+		// The queue must keep flowing when one write fails, or every later one
+		// would inherit that rejection.
+		this.#queue = run.catch(() => undefined);
+		return run;
 	}
 
 	/**
@@ -186,6 +228,19 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 	 * leaves a dangling member, and nothing else would ever clean it up.
 	 */
 	async listByUser(userId: string): Promise<PushSubscription[]> {
+		const found = await this.#held(userId);
+		found.sort(oldestFirst);
+		return found.map(({ endpoint, expirationTime, keys }) => ({
+			endpoint,
+			expirationTime,
+			keys,
+		}));
+	}
+
+	/** The user's live subscriptions with their stamps, dangling members pruned. */
+	async #held(
+		userId: string,
+	): Promise<Array<PushSubscription & { createdAt: number }>> {
 		const endpoints = await (await this.#redis()).smembers(
 			this.#userKey(userId),
 		);
@@ -209,16 +264,15 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 		if (dangling.length > 0) {
 			await (await this.#redis()).srem(this.#userKey(userId), ...dangling);
 		}
-		found.sort((a, b) => a.createdAt - b.createdAt);
-		return found.map(({ endpoint, expirationTime, keys }) => ({
-			endpoint,
-			expirationTime,
-			keys,
-		}));
+		return found;
 	}
 
 	/** Forget one subscription, whoever owns it. */
 	async delete(endpoint: string): Promise<void> {
+		await this.#serial(() => this.#forget(endpoint));
+	}
+
+	async #forget(endpoint: string): Promise<void> {
 		const key = this.#subscriptionKey(endpoint);
 		const stored = await this.#read(endpoint);
 		if (stored) {
@@ -247,6 +301,20 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 		}
 		return readRecord(endpoint, parsed);
 	}
+}
+
+/**
+ * Oldest first by the stamp, then by endpoint for two processes that stamped
+ * the same millisecond: a total order, so concurrent trims agree on which
+ * subscriptions are the oldest and evict the same ones.
+ */
+function oldestFirst(
+	a: { createdAt: number; endpoint: string },
+	b: { createdAt: number; endpoint: string },
+): number {
+	if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
+	if (a.endpoint === b.endpoint) return 0;
+	return a.endpoint < b.endpoint ? -1 : 1;
 }
 
 let lastStamp = 0;

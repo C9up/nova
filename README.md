@@ -66,7 +66,8 @@ answers `404`.
 `vapid` is only needed to SEND: the subscription endpoint works without it.
 
 A user keeps at most `maxSubscriptionsPerUser` subscriptions (default 20): a new one past the cap
-drops that user's oldest. Put a rate limit on the route with `middleware`, so one account cannot
+evicts that user's oldest, inside the store's own `save`, so a burst of concurrent subscribes still
+ends at the cap. Put a rate limit on the route with `middleware`, so one account cannot
 write subscriptions as fast as it can post:
 
 ```ts
@@ -257,7 +258,11 @@ symptom would be notifications that stop arriving.
 
 ```ts
 export interface SubscriptionStore {
-  save(userId: string, subscription: PushSubscription): Promise<void>
+  save(
+    userId: string,
+    subscription: PushSubscription,
+    options?: { maxPerUser?: number },
+  ): Promise<void>
   listByUser(userId: string): Promise<PushSubscription[]>
   delete(endpoint: string): Promise<void>
 }
@@ -266,7 +271,7 @@ export interface SubscriptionStore {
 Wrap it in a factory and it is a store like any other:
 `mine: () => new MySubscriptionStore()`.
 
-Two rules matter, and all four shipped stores follow them.
+Three rules matter, and all four shipped stores follow them.
 
 `save` detaches the endpoint from its previous owner. A push endpoint is
 globally unique per push service, so a browser reused across a logout/login pair
@@ -276,6 +281,11 @@ owner posts the same `p256dh` and `auth` as the stored ones — the browser that
 holds the subscription does; anyone who merely learned the endpoint does not —
 and otherwise throws `E_NOVA_SUBSCRIPTION_CONFLICT`, which the subscribe route
 answers with `409`.
+
+`save` keeps the user under `options.maxPerUser` (default 20), evicting the
+oldest, as part of the same save: concurrent saves for one user must end at the
+cap, so evict by an order every caller agrees on (age, then endpoint), and never
+leave the trimming to whoever called.
 
 And a subscription is checked against the same rules on the way in and on the
 way out: an `https` endpoint within the 768-character storage cap, an

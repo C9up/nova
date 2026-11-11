@@ -102,58 +102,95 @@ describe.each(STORES)("%s store — taking over an endpoint", (_name, make) => {
 });
 
 describe.each(STORES)("%s store — subscriptions per user", (name, make) => {
-	async function subscribe(
-		controller: SubscribeController,
-		userId: string,
-		endpoint: string,
-	): Promise<number> {
-		let status = 0;
-		await controller.handle({
-			request: { body: () => subscription(endpoint) },
-			response: {
-				status(code: number) {
-					status = code;
-					return { json: () => {} };
-				},
-			},
-			auth: { user: { id: userId } },
-		});
-		return status;
-	}
+	const endpointOf = (n: number) =>
+		`https://fcm.googleapis.com/fcm/send/${name}-cap-${n}`;
+	/** SQL orders by a timestamp; distinct seconds make "oldest" exact. */
+	const tick = () =>
+		name === "sql"
+			? new Promise((resolve) => setTimeout(resolve, 1_050))
+			: Promise.resolve();
 
-	it("keeps at most maxSubscriptionsPerUser, dropping the oldest", async () => {
+	it("evicts the oldest on the (cap+1)th save, in the store itself", async () => {
 		const store = await make();
-		const controller = new SubscribeController(store, {
-			maxSubscriptionsPerUser: 3,
-		});
-		const endpoints = [1, 2, 3, 4, 5].map(
-			(n) => `https://fcm.googleapis.com/fcm/send/${name}-cap-${n}`,
-		);
-		for (const endpoint of endpoints) {
-			expect(await subscribe(controller, "u1", endpoint)).toBe(201);
-			// SQL orders by a timestamp; distinct seconds make "oldest" exact.
-			if (name === "sql") await new Promise((r) => setTimeout(r, 1_050));
+		for (const n of [1, 2, 3]) {
+			await store.save("u1", subscription(endpointOf(n)), { maxPerUser: 2 });
+			await tick();
 		}
 
 		const kept = (await store.listByUser("u1")).map((s) => s.endpoint);
-		expect(kept).toHaveLength(3);
-		expect(kept).toEqual(expect.arrayContaining(endpoints.slice(2)));
+		expect(kept).toEqual([endpointOf(2), endpointOf(3)]);
 	}, 15_000);
 
+	it("re-saving a held endpoint at the cap evicts nothing", async () => {
+		const store = await make();
+		await store.save("u1", subscription(endpointOf(1)), { maxPerUser: 2 });
+		await store.save("u1", subscription(endpointOf(2)), { maxPerUser: 2 });
+
+		await store.save("u1", subscription(endpointOf(2), 42), {
+			maxPerUser: 2,
+		});
+
+		expect(await store.listByUser("u1")).toHaveLength(2);
+	});
+
+	it("holds the cap under a flood of concurrent subscribes", async () => {
+		const store = await make();
+		const flood = Array.from({ length: 60 }, (_, n) =>
+			store.save("u1", subscription(endpointOf(100 + n)), { maxPerUser: 5 }),
+		);
+
+		await Promise.all(flood);
+
+		expect(await store.listByUser("u1")).toHaveLength(5);
+	});
+
+	it("defaults to 20 when the caller names no cap", async () => {
+		const store = await make();
+		for (let n = 0; n < 25; n++) {
+			await store.save("u1", subscription(endpointOf(200 + n)));
+		}
+
+		expect(await store.listByUser("u1")).toHaveLength(20);
+	});
+
+	it.each([0, -1, 1.5, Number.NaN])("refuses a cap of %s", async (max) => {
+		const store = await make();
+		await expect(
+			store.save("u1", subscription(endpointOf(300)), { maxPerUser: max }),
+		).rejects.toThrow(/maxPerUser/);
+		expect(await store.listByUser("u1")).toEqual([]);
+	});
+
 	it("does not touch another user's subscriptions", async () => {
+		const store = await make();
+		await store.save("u1", subscription(endpointOf(400)), { maxPerUser: 1 });
+		await store.save("u2", subscription(endpointOf(401)), { maxPerUser: 1 });
+		await store.save("u2", subscription(endpointOf(402)), { maxPerUser: 1 });
+
+		expect(await store.listByUser("u1")).toHaveLength(1);
+		expect((await store.listByUser("u2")).map((s) => s.endpoint)).toEqual([
+			endpointOf(402),
+		]);
+	});
+
+	it("is what the subscribe route applies", async () => {
 		const store = await make();
 		const controller = new SubscribeController(store, {
 			maxSubscriptionsPerUser: 1,
 		});
-		await subscribe(controller, "u1", "https://fcm.googleapis.com/fcm/send/a");
-		await subscribe(controller, "u2", "https://fcm.googleapis.com/fcm/send/b");
-		await subscribe(controller, "u2", "https://fcm.googleapis.com/fcm/send/c");
+		for (const n of [500, 501]) {
+			await controller.handle({
+				request: { body: () => subscription(endpointOf(n)) },
+				response: { status: () => ({ json: () => {} }) },
+				auth: { user: { id: "u1" } },
+			});
+			await tick();
+		}
 
-		expect(await store.listByUser("u1")).toHaveLength(1);
-		expect((await store.listByUser("u2")).map((s) => s.endpoint)).toEqual([
-			"https://fcm.googleapis.com/fcm/send/c",
+		expect((await store.listByUser("u1")).map((s) => s.endpoint)).toEqual([
+			endpointOf(501),
 		]);
-	});
+	}, 15_000);
 });
 
 describe("subscriptions per user — the setting", () => {

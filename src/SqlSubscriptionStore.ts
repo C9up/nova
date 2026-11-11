@@ -20,10 +20,12 @@
  */
 
 import { assertMayTakeOver } from "./_internal/ownership.js";
+import { perUserCap } from "./_internal/per-user-cap.js";
 import { subscriptionProblem } from "./_internal/subscription.js";
 import { NovaError } from "./errors.js";
 import type {
 	PushSubscription,
+	SaveSubscriptionOptions,
 	SubscriptionStore,
 } from "./SubscriptionStore.js";
 
@@ -130,7 +132,12 @@ export class SqlSubscriptionStore implements SubscriptionStore {
 	 * all three dialects, and it keeps a text-bound timestamp away from
 	 * Postgres, which will not coerce one on assignment.
 	 */
-	async save(userId: string, subscription: PushSubscription): Promise<void> {
+	async save(
+		userId: string,
+		subscription: PushSubscription,
+		options: SaveSubscriptionOptions = {},
+	): Promise<void> {
+		const max = perUserCap(options.maxPerUser);
 		// The same rules the subscribe endpoint applies, so a row this store
 		// writes is always one `listByUser` can hand the push layer. A column
 		// type checks a length, not what a P-256 point looks like.
@@ -180,6 +187,34 @@ export class SqlSubscriptionStore implements SubscriptionStore {
 				subscription.expirationTime,
 			],
 		);
+		await this.#trim(db, userId, max);
+	}
+
+	/**
+	 * Evict `userId`'s oldest rows past `max`, in one statement.
+	 *
+	 * One statement is atomic on every dialect, and the order is total
+	 * (`created_at`, then `endpoint` for rows stamped in the same second), so
+	 * concurrent subscribes for one user agree on which rows are the oldest:
+	 * each evicts the same ones, and the user ends at the cap, never under it.
+	 * The inner `LIMIT` sits in a derived table because MySQL refuses both a
+	 * `LIMIT` directly inside `IN` and a subquery naming the table a `DELETE`
+	 * writes; the derived table is materialised first. `max` is a checked
+	 * integer, never input, and some drivers will not bind a `LIMIT`.
+	 */
+	async #trim(
+		db: SubscriptionDatabase,
+		userId: string,
+		max: number,
+	): Promise<void> {
+		await db.execute(
+			`DELETE FROM ${this.#table} WHERE user_id = ${this.#placeholder(db, 1)} ` +
+				"AND endpoint NOT IN (SELECT endpoint FROM (" +
+				`SELECT endpoint FROM ${this.#table} WHERE user_id = ${this.#placeholder(db, 2)} ` +
+				`ORDER BY created_at DESC, endpoint DESC LIMIT ${max}` +
+				") AS kept)",
+			[userId, userId],
+		);
 	}
 
 	/** Every subscription `userId` has registered, oldest first. */
@@ -187,7 +222,7 @@ export class SqlSubscriptionStore implements SubscriptionStore {
 		const db = await this.#db();
 		const rows = await db.query<SubscriptionRow>(
 			`SELECT endpoint, p256dh, auth, expiration_time FROM ${this.#table} ` +
-				`WHERE user_id = ${this.#placeholder(db, 1)} ORDER BY created_at`,
+				`WHERE user_id = ${this.#placeholder(db, 1)} ORDER BY created_at, endpoint`,
 			[userId],
 		);
 		return rows.map((row) => ({

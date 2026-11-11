@@ -24,10 +24,12 @@
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { assertMayTakeOver } from "./_internal/ownership.js";
+import { overCap, perUserCap } from "./_internal/per-user-cap.js";
 import { subscriptionProblem } from "./_internal/subscription.js";
 import { NovaError } from "./errors.js";
 import type {
 	PushSubscription,
+	SaveSubscriptionOptions,
 	SubscriptionStore,
 } from "./SubscriptionStore.js";
 
@@ -65,7 +67,12 @@ export class FileSubscriptionStore implements SubscriptionStore {
 		this.#path = resolve(path);
 	}
 
-	async save(userId: string, subscription: PushSubscription): Promise<void> {
+	async save(
+		userId: string,
+		subscription: PushSubscription,
+		options: SaveSubscriptionOptions = {},
+	): Promise<void> {
+		const max = perUserCap(options.maxPerUser);
 		// Checked on the way in as well as on the way out, so the strictness of
 		// #read can only ever be triggered by a hand-edited file — never by this
 		// store writing something it will later refuse to read, which would brick
@@ -111,6 +118,14 @@ export class FileSubscriptionStore implements SubscriptionStore {
 				p256dh: subscription.keys.p256dh,
 				auth: subscription.keys.auth,
 			};
+			// Inside the same queued step, so concurrent subscribes trim one at a
+			// time against what the previous one left.
+			const held = Object.entries(file.subscriptions)
+				.filter(([, stored]) => stored.userId === userId)
+				.map(([endpoint]) => endpoint);
+			for (const endpoint of overCap(held, max)) {
+				delete file.subscriptions[endpoint];
+			}
 		});
 	}
 

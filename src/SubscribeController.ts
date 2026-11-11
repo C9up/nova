@@ -9,6 +9,7 @@
  * route was registered without a guard (test-only — config sets guard=null).
  */
 
+import { DEFAULT_MAX_SUBSCRIPTIONS_PER_USER } from "./_internal/per-user-cap.js";
 import {
 	type PushTargetPolicy,
 	pushTargetProblem,
@@ -44,14 +45,12 @@ export interface SubscribeContext {
 
 export interface SubscribeOptions extends PushTargetPolicy {
 	/**
-	 * Subscriptions one user may hold. Default 20. Past it, the oldest are
-	 * dropped as a new one arrives: a user has a handful of devices, and every
-	 * subscription is a request the server sends on each notification.
+	 * Subscriptions one user may hold. Default 20. Past it, the store evicts
+	 * the oldest as part of the save: a user has a handful of devices, and
+	 * every subscription is a request the server sends on each notification.
 	 */
 	maxSubscriptionsPerUser?: number;
 }
-
-const DEFAULT_MAX_SUBSCRIPTIONS_PER_USER = 20;
 
 export class SubscribeController {
 	#store: SubscriptionStore;
@@ -104,7 +103,9 @@ export class SubscribeController {
 		const userId = authenticatedUserId(ctx);
 
 		try {
-			await this.#store.save(userId, subscription);
+			await this.#store.save(userId, subscription, {
+				maxPerUser: this.#maxPerUser,
+			});
 		} catch (error) {
 			if (
 				error instanceof NovaError &&
@@ -117,7 +118,6 @@ export class SubscribeController {
 			}
 			throw error;
 		}
-		await this.#trim(userId, subscription.endpoint);
 		ctx.response
 			.status(201)
 			.json({ ok: true, endpoint: subscription.endpoint });
@@ -154,19 +154,6 @@ export class SubscribeController {
 		}
 		await this.#store.delete(endpoint);
 		ctx.response.status(200).json({ ok: true, endpoint });
-	}
-
-	/** Drop the user's oldest subscriptions past the cap — never the one just saved. */
-	async #trim(userId: string, kept: string): Promise<void> {
-		const held = await this.#store.listByUser(userId);
-		let excess = held.length - this.#maxPerUser;
-		// Stores list oldest first.
-		for (const { endpoint } of held) {
-			if (excess <= 0) break;
-			if (endpoint === kept) continue;
-			await this.#store.delete(endpoint);
-			excess -= 1;
-		}
 	}
 }
 

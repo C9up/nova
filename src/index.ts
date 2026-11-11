@@ -39,6 +39,7 @@ export { SubscribeController } from "./SubscribeController.js";
 export {
 	MemorySubscriptionDriver,
 	type PushSubscription,
+	type SaveSubscriptionOptions,
 	type SubscriptionStore,
 } from "./SubscriptionStore.js";
 export { type SubscriptionStoreFactory, stores } from "./stores.js";

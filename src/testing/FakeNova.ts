@@ -15,7 +15,7 @@
  *
  *   useContainer(container);
  *   nova.fake(FakeNova);
- *   // ... code under test calls (await container.resolve('nova')).push(...)
+ *   // ... code under test calls (await container.resolve('nova.push')).push(...)
  *   nova.assertPushed({ userId: "user-A", title: "Welcome" });
  */
 

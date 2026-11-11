@@ -17,6 +17,7 @@
  * peer dependency intact while letting the package compile in isolation.
  */
 
+import "./augmentations.js";
 import type { NovaConfig, NovaRouteMiddleware } from "./config.js";
 import { NovaError } from "./errors.js";
 import { Nova } from "./Nova.js";
@@ -30,8 +31,15 @@ import {
 } from "./SubscriptionStore.js";
 import { clearPush, getPush, setPush } from "./services/main.js";
 
-const SUBSCRIPTION_STORE_TOKEN = "SubscriptionStore";
-const NOVA_TOKEN = "nova";
+/** The tokens nova binds, `<pkg>.<name>` like the rest of the cohort. */
+const SUBSCRIPTION_STORE_TOKEN = "nova.subscriptions";
+const NOVA_TOKEN = "nova.push";
+/**
+ * The names the same bindings had before, kept resolving to the same
+ * instances so an application written against them keeps working.
+ */
+const LEGACY_SUBSCRIPTION_STORE_TOKEN = "SubscriptionStore";
+const LEGACY_NOVA_TOKEN = "nova";
 
 interface ContainerLike {
 	singleton(token: string | symbol, factory: () => unknown): void;
@@ -92,42 +100,64 @@ export default class NovaProvider {
 	register(): void {
 		this.#config = this.#app.config.get<NovaConfig>("nova") ?? {};
 		const explicit = this.#resolveConfiguredStore();
-		const alreadyRegistered =
-			this.#app.container.has?.(SUBSCRIPTION_STORE_TOKEN) ?? false;
+		const container = this.#app.container;
 
 		// Container precedence: a pre-existing binding wins (apps can register
 		// their own driver before booting providers — same pattern as Rover's
 		// optional QueueManager). Then the config-provided store. Otherwise
 		// fall back to the in-memory driver shipped for dev/tests.
-		if (alreadyRegistered) {
-			if (explicit) {
-				console.warn(
-					"[nova] a store is configured but the container already has a SubscriptionStore binding — the config is ignored. Remove one source to silence this warning.",
-				);
-			}
-		} else {
-			this.#app.container.singleton(SUBSCRIPTION_STORE_TOKEN, () => {
-				return explicit ?? new MemorySubscriptionDriver();
-			});
+		const storeBound = this.#bindPair(
+			SUBSCRIPTION_STORE_TOKEN,
+			LEGACY_SUBSCRIPTION_STORE_TOKEN,
+			() => explicit ?? new MemorySubscriptionDriver(),
+		);
+		if (storeBound && explicit) {
+			console.warn(
+				"[nova] a store is configured but the container already has a SubscriptionStore binding — the config is ignored. Remove one source to silence this warning.",
+			);
 		}
-		const novaAlreadyRegistered =
-			this.#app.container.has?.(NOVA_TOKEN) ?? false;
-		if (novaAlreadyRegistered) {
-			if (this.#config.vapid) {
-				console.warn(
-					"[nova] config.nova.vapid is set but the container already has a 'nova' binding — VAPID config ignored. Remove one source to silence this warning.",
-				);
-			}
-		} else {
-			const vapidConfig = this.#config.vapid;
-			const delivery = this.#config.delivery;
-			this.#app.container.singleton(NOVA_TOKEN, async () => {
-				const store = await this.#app.container.resolve<SubscriptionStore>(
+
+		const vapidConfig = this.#config.vapid;
+		const delivery = this.#config.delivery;
+		const novaBound = this.#bindPair(
+			NOVA_TOKEN,
+			LEGACY_NOVA_TOKEN,
+			async () => {
+				const store = await container.resolve<SubscriptionStore>(
 					SUBSCRIPTION_STORE_TOKEN,
 				);
 				return new Nova(store, vapidConfig, delivery);
-			});
+			},
+		);
+		if (novaBound && vapidConfig) {
+			console.warn(
+				"[nova] config.nova.vapid is set but the container already has a 'nova' binding — VAPID config ignored. Remove one source to silence this warning.",
+			);
 		}
+	}
+
+	/**
+	 * Bind `factory` under `token`, and `legacy` to whatever `token` resolves
+	 * to — one instance under both names. When the application bound either
+	 * name first, that binding is kept and the other name points at it.
+	 * Answers whether a binding was already there.
+	 */
+	#bindPair(token: string, legacy: string, factory: () => unknown): boolean {
+		const container = this.#app.container;
+		const hasToken = container.has?.(token) ?? false;
+		const hasLegacy = container.has?.(legacy) ?? false;
+		if (hasToken && hasLegacy) return true;
+		if (hasToken) {
+			container.singleton(legacy, () => container.resolve(token));
+			return true;
+		}
+		if (hasLegacy) {
+			container.singleton(token, () => container.resolve(legacy));
+			return true;
+		}
+		container.singleton(token, factory);
+		container.singleton(legacy, () => container.resolve(token));
+		return false;
 	}
 
 	/**

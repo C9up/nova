@@ -1,3 +1,5 @@
+import "./augmentations.js";
+
 export { DEFAULT_PUSH_SERVICES } from "./_internal/push-services.js";
 export {
 	defineConfig,

@@ -58,7 +58,7 @@ function appWith(config: NovaConfig): {
 function storeFrom(config: NovaConfig): unknown {
 	const { app, bindings } = appWith(config);
 	new NovaProvider(app).register();
-	return bindings.get("SubscriptionStore")?.();
+	return bindings.get("nova.subscriptions")?.();
 }
 
 describe("nova > store selection", () => {

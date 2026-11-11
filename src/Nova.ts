@@ -31,7 +31,7 @@ import {
 	resolvePushTargetPolicy,
 } from "./_internal/push-services.js";
 import { keysProblem } from "./_internal/subscription.js";
-import { normaliseUserId } from "./_internal/user-id.js";
+import { pushToUserKey } from "./_internal/user-id.js";
 import { validateVapidConfig } from "./_internal/vapid-config.js";
 import type { NovaVapidConfig } from "./config.js";
 import type {
@@ -267,12 +267,7 @@ export class Nova {
 		payload: PushPayload,
 		options: PushOptions = {},
 	): Promise<PushResult[]> {
-		const key = normaliseUserId(userId);
-		if (key === undefined) {
-			throw new TypeError(
-				`[nova] pushToUser: ${String(userId)} is not a user id (a non-empty string or an integer)`,
-			);
-		}
+		const key = pushToUserKey(userId);
 		const subs = await this.#store.listByUser(key);
 		// Per-subscription error isolation: a thrown error on one device (network
 		// failure, JSON.stringify on a non-serializable payload, etc.) MUST NOT

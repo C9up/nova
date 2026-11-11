@@ -19,6 +19,7 @@
  *   nova.assertPushed({ userId: "user-A", title: "Welcome" });
  */
 
+import { pushToUserKey } from "../_internal/user-id.js";
 import type {
 	PushOptions,
 	PushPayload,
@@ -85,15 +86,19 @@ export class FakeNova {
 		return { ok: true, status: 201, endpoint: subscription.endpoint };
 	}
 
-	/** Same signature as `Nova.pushToUser`; the id is captured as its text. */
+	/**
+	 * Same signature as `Nova.pushToUser`, and the same refusal of an id that is
+	 * not one; a valid id is captured as its text.
+	 */
 	async pushToUser(
 		userId: string | number | bigint,
 		payload: PushPayload,
 		options: PushOptions = {},
 	): Promise<PushResult[]> {
+		const key = pushToUserKey(userId);
 		this.#captured.push({
 			kind: "fan-out",
-			userId: String(userId),
+			userId: key,
 			payload: clonePayload(payload),
 			options: cloneOptions(options),
 			timestamp: Date.now(),

@@ -8,10 +8,12 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import type {
-	PushOptions,
-	PushPayload,
-	PushSubscription,
+import {
+	MemorySubscriptionDriver,
+	Nova,
+	type PushOptions,
+	type PushPayload,
+	type PushSubscription,
 } from "../../src/index.js";
 import { type CapturedPush, FakeNova } from "../../src/testing/FakeNova.js";
 
@@ -93,6 +95,36 @@ describe("FakeNova — pushToUser() capture", () => {
 		const fake = new FakeNova();
 		await fake.pushToUser(42, welcomePayload());
 		fake.assertPushed({ userId: "42" });
+	});
+
+	it.each([
+		["", ""],
+		["NaN", Number.NaN],
+		["1.5", 1.5],
+	])("throws on %s exactly as Nova.pushToUser does", async (_label, id) => {
+		const fake = new FakeNova();
+		const real = new Nova(new MemorySubscriptionDriver(), undefined);
+
+		const fakeError = await fake
+			.pushToUser(id, welcomePayload())
+			.catch((e) => e);
+		const realError = await real
+			.pushToUser(id, welcomePayload())
+			.catch((e) => e);
+
+		expect(fakeError).toBeInstanceOf(TypeError);
+		expect(fakeError).toEqual(realError);
+		expect(fake.getPushed()).toEqual([]);
+	});
+
+	it("throws on an id that is undefined at runtime, as an unloaded relation is", async () => {
+		const fake = new FakeNova();
+		// @ts-expect-error — the type refuses it; the value still arrives when a
+		// relation was not loaded, and the fake must fail where production does.
+		await expect(fake.pushToUser(undefined, welcomePayload())).rejects.toThrow(
+			"[nova] pushToUser: undefined is not a user id",
+		);
+		expect(() => fake.assertPushed({ userId: "undefined" })).toThrow();
 	});
 
 	it("pushToUser() captures both call kinds in order", async () => {

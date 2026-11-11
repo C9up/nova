@@ -35,8 +35,11 @@ import { clearPush, getPush, setPush } from "./services/main.js";
 const SUBSCRIPTION_STORE_TOKEN = "nova.subscriptions";
 const NOVA_TOKEN = "nova.push";
 /**
- * The names the same bindings had before, kept resolving to the same
- * instances so an application written against them keeps working.
+ * COMPATIBILITY ALIASES: the names the same bindings had before, kept
+ * resolving to the same instances. Published releases bound `'nova'` and
+ * `'SubscriptionStore'`, and the module guide shows `resolve('nova')`, so an
+ * application written against them keeps working. Code written now resolves
+ * `nova.push` / `nova.subscriptions`.
  */
 const LEGACY_SUBSCRIPTION_STORE_TOKEN = "SubscriptionStore";
 const LEGACY_NOVA_TOKEN = "nova";

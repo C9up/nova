@@ -10,13 +10,16 @@
  * Reach via `@c9up/nova/testing`; not re-exported from the main barrel
  * (mirrors Rover's `FakeMail` shape).
  *
+ * Swap it in with helix's `override`, which undoes itself when the test ends:
+ *
  *   import { FakeNova } from "@c9up/nova/testing";
- *   import { nova, useContainer } from "@c9up/helix";
+ *   import { override, useContainer } from "@c9up/helix";
  *
  *   useContainer(container);
- *   nova.fake(FakeNova);
+ *   const fake = new FakeNova();
+ *   override("nova.push", fake);
  *   // ... code under test calls (await container.resolve('nova.push')).push(...)
- *   nova.assertPushed({ userId: "user-A", title: "Welcome" });
+ *   fake.assertPushed({ userId: "user-A", title: "Welcome" });
  */
 
 import { pushToUserKey } from "../_internal/user-id.js";

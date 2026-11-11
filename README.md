@@ -326,16 +326,21 @@ service and that request was never made.
 
 ```ts
 import { FakeNova } from '@c9up/nova/testing'
-import { nova, useContainer } from '@c9up/helix'
+import { override, useContainer } from '@c9up/helix'
 
 useContainer(container)
-nova.fake(FakeNova)
+const fake = new FakeNova()
+override('nova.push', fake)
 
 await orderShipped(order)
 
-nova.assertPushed({ userId: 'user-A', title: 'Order shipped' })
-nova.assertNotPushed({ title: 'Order cancelled' })
+fake.assertPushed({ userId: 'user-A', title: 'Order shipped' })
+fake.assertNotPushed({ title: 'Order cancelled' })
 ```
+
+`override` throws outside a test and is undone when the test ends. The provider
+binds the same instance under `'nova'` too (the name the token had before it
+carried its package): override the name the code under test resolves.
 
 Nothing leaves the process: `FakeNova` captures instead of sending, and answers a synthetic
 `{ ok: true, status: 201 }`. It captures only — for the real fan-out semantics (one result per

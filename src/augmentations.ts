@@ -26,8 +26,9 @@ declare module "@c9up/ream/types" {
 		/** The subscription store the push sender and the routes use. */
 		"nova.subscriptions": SubscriptionStore;
 		/**
-		 * The push sender under the name it had before the token carried its
-		 * package. Kept bound so an existing `container.resolve(...)` resolves.
+		 * Compatibility alias: the push sender under the name it had before the
+		 * token carried its package. Kept bound so an existing
+		 * `container.resolve(...)` resolves; new code resolves `nova.push`.
 		 */
 		nova: Nova;
 		/** The store under its earlier name, kept bound for the same reason. */

@@ -21,9 +21,7 @@ export default class CreatePushSubscriptions extends Migration {
 			t.string("p256dh", 100).notNullable();
 			t.string("auth", 50).notNullable();
 			t.bigInteger("expiration_time").nullable();
-			// Explicit timestamp columns without DEFAULT — Atlas's `t.timestamps()`
-			// emits `DEFAULT (NOW())` which is not a SQLite function and would
-			// fail at `migrations:run` against a fresh sqlite app. nova's
+			// Explicit timestamp columns without DEFAULT: nova's
 			// `SqlSubscriptionStore` writes `created_at` / `updated_at` itself on
 			// every INSERT and UPDATE, as CURRENT_TIMESTAMP on every dialect, so
 			// the absence of a DDL default is intentional, not an oversight.

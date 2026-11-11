@@ -153,15 +153,15 @@ await push.push(subscription, payload, {
 import { registerServiceWorker, subscribe } from '@c9up/nova/client'
 
 await registerServiceWorker('/sw.js')
-await subscribe({
-  publicKey: '<NOVA_VAPID_PUBLIC_KEY>',
+await subscribe('<NOVA_VAPID_PUBLIC_KEY>', {
   endpoint: '/api/nova/subscribe',   // where the subscription is POSTed
   headers: { Authorization: `Bearer ${token}` },
 })
 ```
 
-`subscribe()` asks for permission, subscribes through the service worker, and posts the result to
-your application. On logout, call `unsubscribe()` (same options) before the session ends: it
+`subscribe(publicKey, options)` asks for permission, subscribes through the service worker, and
+posts the result to your application. On logout, call `unsubscribe(options)` with the same options
+before the session ends: it
 removes the subscription from your application and drops it in the browser, so a shared or lost
 device stops showing the account's notifications.
 

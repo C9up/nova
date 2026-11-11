@@ -113,14 +113,17 @@ export function subscriptionProblem(
 		return `the endpoint is ${endpoint.length} characters, over the ${MAX_ENDPOINT_LENGTH} a stored one may be`;
 	}
 	// `null` is what a subscription that does not expire carries, which is most
-	// of them — so the check is null-or-number, never truthiness.
+	// of them — so the check is null-or-number, never truthiness. A number is
+	// an epoch in milliseconds, always whole in a browser, and the SQL column is
+	// a BIGINT: a fraction or a value past the safe integers would fail the
+	// insert as a 500, or come back from the other stores as something else.
 	if (expirationTime !== null) {
 		if (
 			typeof expirationTime !== "number" ||
-			!Number.isFinite(expirationTime) ||
+			!Number.isSafeInteger(expirationTime) ||
 			expirationTime < 0
 		) {
-			return "the `expirationTime` is neither null nor a finite, non-negative number";
+			return "the `expirationTime` is neither null nor a non-negative integer of milliseconds";
 		}
 	}
 	return keysProblem(p256dh, auth);

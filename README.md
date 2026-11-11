@@ -295,7 +295,7 @@ the two, the browser can move to another account, whose row would go instead.
 
 And a subscription is checked against the same rules on the way in and on the
 way out: an `https` endpoint within the 768-character storage cap, an
-`expirationTime` that is `null` or a number, a `p256dh` that is a P-256 point
+`expirationTime` that is `null` or a whole, non-negative number of milliseconds, a `p256dh` that is a P-256 point
 and an `auth` that is a 16-byte secret, both base64url. A store never writes a record it
 would refuse to read, and never hands the push layer one that fails at
 encryption time — where the message names neither the record nor the endpoint,

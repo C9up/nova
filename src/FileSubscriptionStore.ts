@@ -206,6 +206,7 @@ export class FileSubscriptionStore implements SubscriptionStore {
 			);
 		}
 
+		forgetUnholdableExpiries(parsed);
 		if (!isStoreFile(parsed)) {
 			throw new NovaError(
 				"E_NOVA_STORE_FILE_UNREADABLE",
@@ -249,6 +250,34 @@ function isNotFound(error: unknown): boolean {
 		"code" in error &&
 		error.code === "ENOENT"
 	);
+}
+
+/**
+ * Earlier versions accepted any finite `expirationTime`, so a file may hold a
+ * fraction or a value past the safe integers that today's rules refuse. One
+ * such record would make the whole file unreadable — every subscription in it
+ * lost to an expiry a client posted. The field is informational (nothing is
+ * sent or skipped by it), so an expiry no epoch can be is read as none, and
+ * written back that way.
+ */
+function forgetUnholdableExpiries(value: unknown): void {
+	if (typeof value !== "object" || value === null) return;
+	if (!("subscriptions" in value)) return;
+	const { subscriptions } = value;
+	if (typeof subscriptions !== "object" || subscriptions === null) return;
+	for (const stored of Object.values(subscriptions)) {
+		if (
+			typeof stored === "object" &&
+			stored !== null &&
+			"expirationTime" in stored &&
+			typeof stored.expirationTime === "number" &&
+			Number.isFinite(stored.expirationTime) &&
+			stored.expirationTime >= 0 &&
+			!Number.isSafeInteger(stored.expirationTime)
+		) {
+			stored.expirationTime = null;
+		}
+	}
 }
 
 function isStoreFile(value: unknown): value is StoreFile {

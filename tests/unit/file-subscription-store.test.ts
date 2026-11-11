@@ -186,8 +186,37 @@ describe("nova > FileSubscriptionStore", () => {
 		);
 
 		await expect(store.listByUser("user-A")).rejects.toThrow(
-			/neither null nor a finite, non-negative number/,
+			/neither null nor a non-negative integer of milliseconds/,
 		);
+	});
+
+	it("reads an expiry an earlier version let through as none, rather than refusing the file", async () => {
+		// Earlier versions took any finite number; one fractional expiry posted
+		// by a client must not make every subscription in the file unreadable.
+		await mkdir(dirname(path), { recursive: true });
+		await writeFile(
+			path,
+			JSON.stringify({
+				version: 1,
+				subscriptions: {
+					"https://push.example/legacy": {
+						userId: "user-A",
+						expirationTime: 1.5,
+						p256dh: P256DH,
+						auth: AUTH,
+					},
+				},
+			}),
+			"utf8",
+		);
+
+		expect(await store.listByUser("user-A")).toEqual([
+			{
+				endpoint: "https://push.example/legacy",
+				expirationTime: null,
+				keys: { p256dh: P256DH, auth: AUTH },
+			},
+		]);
 	});
 
 	it("keeps accepting a subscription that never expires", async () => {

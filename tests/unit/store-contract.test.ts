@@ -274,3 +274,31 @@ describe.each(STORES)(
 		});
 	},
 );
+
+describe.each(STORES.filter(([name]) => name !== "memory"))(
+	"%s store — the expiry it stores",
+	(_name, make) => {
+		it.each([1e30, 1.5, -1])(
+			"refuses an expirationTime of %s",
+			async (expirationTime) => {
+				const store = await make();
+				const endpoint = "https://fcm.googleapis.com/fcm/send/expiry";
+
+				await expect(
+					store.save("u1", { ...subscription(endpoint), expirationTime }),
+				).rejects.toMatchObject({ code: "E_NOVA_INVALID_SUBSCRIPTION" });
+				expect(await store.listByUser("u1")).toEqual([]);
+			},
+		);
+
+		it("keeps an integer epoch exactly", async () => {
+			const store = await make();
+			const sent = subscription(
+				"https://fcm.googleapis.com/fcm/send/epoch",
+				1_893_456_000_123,
+			);
+			await store.save("u1", sent);
+			expect(await store.listByUser("u1")).toEqual([sent]);
+		});
+	},
+);

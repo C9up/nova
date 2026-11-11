@@ -268,6 +268,28 @@ describe("nova > subscribe route (integration)", () => {
 		expect(await store.listByUser("user-1")).toEqual([]);
 	});
 
+	it.each([1e30, 1.5, Number.MAX_SAFE_INTEGER + 2])(
+		"returns 400 for an expirationTime of %s, which a BIGINT epoch cannot hold",
+		async (expirationTime) => {
+			const { router, routes } = makeRouter();
+			const store = new MemorySubscriptionDriver();
+			const provider = new NovaProvider(makeApp({ router, store }));
+			provider.register();
+			await provider.start();
+			const handler = routes[0]?.handler;
+			if (!handler) throw new Error("handler not captured");
+
+			const { ctx, captured } = makeCtx("user-1", {
+				...VALID_BODY,
+				expirationTime,
+			});
+			await handler(ctx);
+
+			expect(captured.status).toBe(400);
+			expect(await store.listByUser("user-1")).toEqual([]);
+		},
+	);
+
 	it("upserts on duplicate POST for the same user (no duplicate row)", async () => {
 		const { router, routes } = makeRouter();
 		const store = new MemorySubscriptionDriver();

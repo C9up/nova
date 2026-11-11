@@ -63,6 +63,19 @@ stores the browser's subscription against the authenticated user. `DELETE {route
 with `{ endpoint }` removes it again — only from the authenticated user; another user's endpoint
 answers `404`.
 
+Both routes read a JSON body, and ream parses one only where its body parser runs. Keep it in the
+router middleware of `start/kernel.ts`, as the web starter kit does:
+
+```ts
+router.use([
+  () => import('@c9up/ream/bodyparser_middleware'),
+  // ...
+])
+```
+
+Without it the body reads as `{}` and every subscribe answers `400 E_NOVA_INVALID_SUBSCRIPTION`.
+The browser helpers send `content-type: application/json`; a client of your own has to as well.
+
 `vapid` is only needed to SEND: the subscription endpoint works without it.
 
 A user keeps at most `maxSubscriptionsPerUser` subscriptions (default 20): a new one past the cap

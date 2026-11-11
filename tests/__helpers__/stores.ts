@@ -1,70 +1,11 @@
 /**
- * Backends the store tests run against: a real SQL engine and a Redis that
- * keeps Redis semantics, both in process.
+ * The SQL engine the store tests run against, real and in process. The
+ * Redis store's run against a real server: see `redis.ts`.
  */
 
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
-import type {
-	SubscriptionDatabase,
-	SubscriptionRedisClient,
-} from "../../src/index.js";
+import type { SubscriptionDatabase } from "../../src/index.js";
 import { asRequested } from "./container.js";
-
-/**
- * The Redis store, against an in-process Redis that behaves like one.
- *
- * The fake implements the six commands the contract asks for with real Redis
- * semantics — a set is a set, `get` on a missing key is `null`, `srem` takes
- * several members — so what these exercise is the store's own logic: who owns
- * an endpoint, what happens to the previous owner, and what a half-written
- * record does to a listing.
- */
-export class FakeRedis implements SubscriptionRedisClient {
-	readonly strings = new Map<string, string>();
-	readonly sets = new Map<string, Set<string>>();
-
-	async get(key: string): Promise<string | null> {
-		return this.strings.get(key) ?? null;
-	}
-
-	async set(key: string, value: string): Promise<unknown> {
-		this.strings.set(key, value);
-		return "OK";
-	}
-
-	async del(key: string | string[]): Promise<number> {
-		const keys = Array.isArray(key) ? key : [key];
-		let removed = 0;
-		for (const one of keys) if (this.strings.delete(one)) removed += 1;
-		return removed;
-	}
-
-	async sadd(key: string, ...members: string[]): Promise<number> {
-		const set = this.sets.get(key) ?? new Set<string>();
-		this.sets.set(key, set);
-		let added = 0;
-		for (const member of members) {
-			if (!set.has(member)) {
-				set.add(member);
-				added += 1;
-			}
-		}
-		return added;
-	}
-
-	async srem(key: string, ...members: string[]): Promise<number> {
-		const set = this.sets.get(key);
-		if (!set) return 0;
-		let removed = 0;
-		for (const member of members) if (set.delete(member)) removed += 1;
-		return removed;
-	}
-
-	/** A Redis set has no order: answered newest first, so no test leans on one. */
-	async smembers(key: string): Promise<string[]> {
-		return [...(this.sets.get(key) ?? [])].reverse();
-	}
-}
 
 /** The migration's schema, in SQLite terms. */
 const SCHEMA = `

@@ -44,10 +44,23 @@ jobs:
   # nova is a pure-TS leaf: zero @c9up runtime deps, builds and tests
   # standalone (no native crate, no cross-compile matrix, no sibling
   # checkout). A single ubuntu runner builds with tsc and runs the full
-  # vitest suite.
+  # vitest suite. A real Redis, so the Redis store's suites RUN here: its
+  # writes are server-side scripts no fake can run, and they skip only where
+  # REDIS_TEST_URL is unset (set but unreachable fails the run).
   build-and-test:
     name: Build & test
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      REDIS_TEST_URL: redis://127.0.0.1:6379
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6

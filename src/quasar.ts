@@ -16,7 +16,7 @@ import {
 } from "./vendor/quasarConnection.js";
 
 // The commands the store issues. A client missing one cannot serve it.
-const REQUIRED = ["get", "set", "del", "sadd", "srem", "smembers"] as const;
+const REQUIRED = ["get", "eval"] as const;
 
 /**
  * The connection is handed over only once it carries every command above.

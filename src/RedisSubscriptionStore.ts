@@ -6,10 +6,9 @@
  * application already running Redis for its cache or its queue can keep
  * subscriptions there instead of adding a table.
  *
- * No import of a Redis package. The client is taken structurally — the same
- * minimal contract `@c9up/echo` and `@c9up/bay` take, satisfied by ioredis and
- * node-redis alike, and by `@c9up/quasar`'s connection, which merges the
- * ioredis surface in.
+ * No import of a Redis package. The client is taken structurally — `get` and
+ * `eval`, in the shape ioredis gives them, which a `@c9up/quasar` connection
+ * merges in — the same contract `@c9up/bay` and `@c9up/eclipse` take.
  *
  *   // config/nova.ts
  *   import redis from '@c9up/quasar/services/main'
@@ -19,6 +18,24 @@
  *     store: new RedisSubscriptionStore(redis.connection()),
  *   })
  *
+ * Several processes share one Redis, so no check may run in one process and
+ * the write it guards in another command: two processes would both read a
+ * user under the cap and both add, or an old owner would delete an endpoint
+ * another process moved to someone else in between. Every write is a script
+ * on ONE key, which the server runs whole, and which a Redis Cluster serves
+ * from the node holding that key:
+ *
+ * - `<prefix>:sub:<endpoint>`, the record (JSON, with its owner), is only
+ *   replaced or deleted if it still holds what was read: the owner and key
+ *   checks run on what is actually stored.
+ * - `<prefix>:user:<userId>`, the user's endpoints, is a sorted set scored by
+ *   when each was saved. Adding one and evicting the oldest past the cap is
+ *   one script, so the cap holds whoever adds at once.
+ *
+ * The record keys are the ones earlier versions wrote. The user key was a
+ * plain set; the first script that touches one converts it in place, its
+ * members scored 0, the oldest.
+ *
  * Durability is the server's, not this class's: a Redis with no persistence
  * loses every subscription on restart, which is the failure the in-memory
  * driver has. Browsers re-subscribe on their next visit, so the cost is a
@@ -27,7 +44,7 @@
  */
 
 import { assertMayTakeOver } from "./_internal/ownership.js";
-import { overCap, perUserCap } from "./_internal/per-user-cap.js";
+import { perUserCap } from "./_internal/per-user-cap.js";
 import {
 	isSubscriptionFields,
 	subscriptionProblem,
@@ -39,14 +56,15 @@ import type {
 	SubscriptionStore,
 } from "./SubscriptionStore.js";
 
-/** Minimal Redis client — compatible with ioredis, node-redis and quasar. */
+/** Minimal Redis client — compatible with ioredis and quasar. */
 export interface SubscriptionRedisClient {
 	get(key: string): Promise<string | null>;
-	set(key: string, value: string, ...args: unknown[]): Promise<unknown>;
-	del(key: string | string[]): Promise<number>;
-	sadd(key: string, ...members: string[]): Promise<number>;
-	srem(key: string, ...members: string[]): Promise<number>;
-	smembers(key: string): Promise<string[]>;
+	/** `EVAL script numKeys key... arg...` — every write is one. */
+	eval(
+		script: string,
+		numKeys: number,
+		...args: Array<string | number>
+	): Promise<unknown>;
 }
 
 /**
@@ -73,24 +91,97 @@ interface StoredSubscription {
 	p256dh: string;
 	auth: string;
 	/**
-	 * When it was stored, in ms. A set has no order, and `listByUser` answers
-	 * oldest first like the other stores. Records written before it existed
-	 * read as 0, the oldest.
+	 * When it was stored, in ms: the score of the endpoint in its owner's
+	 * set. Records written before it existed read as 0, the oldest.
 	 */
 	createdAt: number;
 }
+
+/**
+ * Replace or delete a record only if it still holds what was read.
+ * ARGV: `1` and the value read, or `0` when it was absent; then `set` and
+ * the new value, or `del`.
+ */
+const SWAP_RECORD = `
+local current = redis.call('GET', KEYS[1])
+if ARGV[1] == '1' then
+  if current ~= ARGV[2] then return 0 end
+elseif current then
+  return 0
+end
+if ARGV[3] == 'del' then
+  redis.call('DEL', KEYS[1])
+else
+  redis.call('SET', KEYS[1], ARGV[4])
+end
+return 1
+`;
+
+/** A user's set as a sorted set, converted in place from a plain one. */
+const USER_INDEX = `
+local function index(key)
+  if redis.call('TYPE', key).ok == 'set' then
+    local members = redis.call('SMEMBERS', key)
+    redis.call('DEL', key)
+    for _, member in ipairs(members) do
+      redis.call('ZADD', key, 0, member)
+    end
+  end
+end
+index(KEYS[1])
+`;
+
+/**
+ * Add an endpoint (ARGV[1]) saved at ARGV[2], and evict the oldest past the
+ * cap (ARGV[3]); answers the evicted endpoints and their scores. Equal scores
+ * order by endpoint, so the order is total.
+ */
+const ADD_TO_USER = `${USER_INDEX}
+redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
+local over = redis.call('ZCARD', KEYS[1]) - tonumber(ARGV[3])
+if over <= 0 then return {} end
+local evicted = redis.call('ZRANGE', KEYS[1], 0, over - 1, 'WITHSCORES')
+redis.call('ZREMRANGEBYRANK', KEYS[1], 0, over - 1)
+return evicted
+`;
+
+/** The user's endpoints and their scores, oldest first. */
+const USER_MEMBERS = `${USER_INDEX}
+return redis.call('ZRANGE', KEYS[1], 0, -1, 'WITHSCORES')
+`;
+
+/**
+ * Remove endpoints from a user's set, each given with the score it was read
+ * at, or an empty score for any. A member saved again since has a new score
+ * and stays; one converted from a plain set, scored 0, goes. Answers how many
+ * went.
+ */
+const REMOVE_FROM_USER = `${USER_INDEX}
+local removed = 0
+for i = 1, #ARGV, 2 do
+  local score = redis.call('ZSCORE', KEYS[1], ARGV[i])
+  if score and (ARGV[i + 1] == '' or tonumber(score) == 0
+      or tonumber(score) == tonumber(ARGV[i + 1])) then
+    removed = removed + redis.call('ZREM', KEYS[1], ARGV[i])
+  end
+end
+return removed
+`;
+
+/**
+ * How many times a write reads a record again after another process changed
+ * it between the read and the write. Each retry means another write landed
+ * on the same endpoint, so running out means a flood on one endpoint.
+ */
+const ATTEMPTS = 16;
+
+/** An endpoint in a user's set, with the score it was found at. */
+type Member = readonly [endpoint: string, score: number | undefined];
 
 export class RedisSubscriptionStore implements SubscriptionStore {
 	readonly #source: SubscriptionRedisResolver;
 	#resolved: SubscriptionRedisClient | undefined;
 	readonly #prefix: string;
-	/**
-	 * Serialises this instance's writes. The contract is six plain commands —
-	 * what every client and a Redis Cluster serve — so a write is several round
-	 * trips, and two subscribes interleaving between them would each read a
-	 * state the other is changing. Queued, they run one after the other.
-	 */
-	#queue: Promise<unknown> = Promise.resolve();
 
 	constructor(
 		redis: SubscriptionRedisResolver,
@@ -120,7 +211,7 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 		return `${this.#prefix}:sub:${endpoint}`;
 	}
 
-	/** The set of endpoints one user has registered. */
+	/** The sorted set of endpoints one user has registered. */
 	#userKey(userId: string): string {
 		return `${this.#prefix}:user:${userId}`;
 	}
@@ -141,9 +232,9 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 	): Promise<void> {
 		const max = perUserCap(options.maxPerUser);
 		// Checked on the way in as well as on the way out, so the strictness of
-		// #read can only ever be triggered by a hand-written key — never by this
-		// store writing a record it will later refuse to read, which would drop
-		// the subscription silently on the next listing.
+		// readRecord can only ever be triggered by a hand-written key — never by
+		// this store writing a record it will later refuse to read, which would
+		// drop the subscription silently on the next listing.
 		const problem = subscriptionProblem({
 			endpoint: subscription.endpoint,
 			expirationTime: subscription.expirationTime,
@@ -160,97 +251,74 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 			);
 		}
 
-		await this.#serial(() => this.#write(userId, subscription, max));
-	}
-
-	async #write(
-		userId: string,
-		subscription: PushSubscription,
-		max: number,
-	): Promise<void> {
-		const previous = await this.#read(subscription.endpoint);
-		assertMayTakeOver(
-			subscription.endpoint,
-			userId,
-			previous && {
-				userId: previous.userId,
-				keys: { p256dh: previous.p256dh, auth: previous.auth },
-			},
-			subscription.keys,
-		);
-		if (previous && previous.userId !== userId) {
-			await (await this.#redis()).srem(
-				this.#userKey(previous.userId),
-				subscription.endpoint,
+		const redis = await this.#redis();
+		const { endpoint } = subscription;
+		const key = this.#subscriptionKey(endpoint);
+		for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+			const raw = await redis.get(key);
+			const previous = raw === null ? undefined : parseRecord(endpoint, raw);
+			// On what is stored now: the swap below writes only if it still is.
+			assertMayTakeOver(
+				endpoint,
+				userId,
+				previous && {
+					userId: previous.userId,
+					keys: { p256dh: previous.p256dh, auth: previous.auth },
+				},
+				subscription.keys,
 			);
-		}
+			const stored: StoredSubscription = {
+				userId,
+				expirationTime: subscription.expirationTime,
+				p256dh: subscription.keys.p256dh,
+				auth: subscription.keys.auth,
+				createdAt: nextStamp(),
+			};
+			if (!(await this.#swap(redis, key, raw, JSON.stringify(stored)))) {
+				continue;
+			}
 
-		const key = this.#subscriptionKey(subscription.endpoint);
-		const stored: StoredSubscription = {
-			userId,
-			expirationTime: subscription.expirationTime,
-			p256dh: subscription.keys.p256dh,
-			auth: subscription.keys.auth,
-			createdAt: nextStamp(),
-		};
-		await (await this.#redis()).set(key, JSON.stringify(stored));
-		await (await this.#redis()).sadd(
-			this.#userKey(userId),
-			subscription.endpoint,
-		);
-
-		const held = (await this.#held(userId))
-			.sort(oldestFirst)
-			.map(({ endpoint }) => endpoint);
-		const evicted = overCap(held, max);
-		if (evicted.length > 0) {
-			await (await this.#redis()).srem(this.#userKey(userId), ...evicted);
-			await (await this.#redis()).del(
-				evicted.map((endpoint) => this.#subscriptionKey(endpoint)),
+			if (previous && previous.userId !== userId) {
+				await this.#removeFromUser(redis, previous.userId, [
+					[endpoint, previous.createdAt],
+				]);
+			}
+			const evicted = await this.#addToUser(
+				redis,
+				userId,
+				endpoint,
+				stored.createdAt,
+				max,
 			);
+			for (const [gone, score] of evicted) {
+				await this.#dropOwned(redis, userId, gone, score);
+			}
+			return;
 		}
-	}
-
-	/** Run one write after the ones already queued, failures included. */
-	async #serial<T>(write: () => Promise<T>): Promise<T> {
-		const run = this.#queue.then(write);
-		// The queue must keep flowing when one write fails, or every later one
-		// would inherit that rejection.
-		this.#queue = run.catch(() => undefined);
-		return run;
+		throw busy();
 	}
 
 	/**
 	 * Every subscription `userId` has registered, oldest first.
 	 *
-	 * A member whose record is gone is dropped from the set on the way past:
-	 * the two keys are written separately, so a process that died between them
-	 * leaves a dangling member, and nothing else would ever clean it up.
+	 * A member whose record is gone or now someone else's is dropped from the
+	 * set on the way past: the record and the set are written one after the
+	 * other, so a process that died between them leaves a dangling member,
+	 * and nothing else would ever clean it up.
 	 */
 	async listByUser(userId: string): Promise<PushSubscription[]> {
-		const found = await this.#held(userId);
-		found.sort(oldestFirst);
-		return found.map(({ endpoint, expirationTime, keys }) => ({
-			endpoint,
-			expirationTime,
-			keys,
-		}));
-	}
-
-	/** The user's live subscriptions with their stamps, dangling members pruned. */
-	async #held(
-		userId: string,
-	): Promise<Array<PushSubscription & { createdAt: number }>> {
-		const endpoints = await (await this.#redis()).smembers(
-			this.#userKey(userId),
+		const redis = await this.#redis();
+		const members = pairs(
+			await redis.eval(USER_MEMBERS, 1, this.#userKey(userId)),
 		);
 		const found: Array<PushSubscription & { createdAt: number }> = [];
-		const dangling: string[] = [];
+		const dangling: Member[] = [];
 
-		for (const endpoint of endpoints) {
-			const stored = await this.#read(endpoint);
+		for (const [endpoint, score] of members) {
+			const raw = await redis.get(this.#subscriptionKey(endpoint));
+			const stored = raw === null ? undefined : parseRecord(endpoint, raw);
 			if (!stored || stored.userId !== userId) {
-				dangling.push(endpoint);
+				dangling.push([endpoint, score]);
 				continue;
 			}
 			found.push({
@@ -262,65 +330,170 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 		}
 
 		if (dangling.length > 0) {
-			await (await this.#redis()).srem(this.#userKey(userId), ...dangling);
+			await this.#removeFromUser(redis, userId, dangling);
 		}
-		return found;
+		found.sort(oldestFirst);
+		return found.map(({ endpoint, expirationTime, keys }) => ({
+			endpoint,
+			expirationTime,
+			keys,
+		}));
 	}
 
 	/** Forget one subscription, whoever owns it. */
 	async delete(endpoint: string): Promise<void> {
-		await this.#serial(() => this.#forget(endpoint));
+		const redis = await this.#redis();
+		const key = this.#subscriptionKey(endpoint);
+		for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+			const raw = await redis.get(key);
+			if (raw === null) return;
+			if (!(await this.#swap(redis, key, raw, null))) continue;
+			const stored = parseRecord(endpoint, raw);
+			if (stored) {
+				await this.#removeFromUser(redis, stored.userId, [
+					[endpoint, stored.createdAt],
+				]);
+			}
+			return;
+		}
+		throw busy();
 	}
 
 	/**
 	 * Forget `endpoint` if `userId` holds it.
 	 *
-	 * Queued with every other write of this instance, so a takeover arriving
-	 * through the same process cannot land between the check and the removal.
-	 * The user's own set is emptied first: `srem` on it is atomic and cannot
-	 * reach another account's set, so from that command on no push for this
-	 * user goes to the endpoint, whatever another process does meanwhile.
+	 * The user's own set is emptied first, so from that command on no push
+	 * for this user goes to the endpoint. The record goes only if it is still
+	 * this user's when it is deleted: an endpoint another process moved to
+	 * someone else in between stays theirs.
 	 */
 	async deleteForUser(userId: string, endpoint: string): Promise<boolean> {
-		return this.#serial(async () => {
-			const redis = await this.#redis();
-			const listed = await redis.srem(this.#userKey(userId), endpoint);
-			const stored = await this.#read(endpoint);
-			if (stored?.userId !== userId) return listed > 0;
-			await redis.del(this.#subscriptionKey(endpoint));
-			return true;
-		});
-	}
-
-	async #forget(endpoint: string): Promise<void> {
-		const key = this.#subscriptionKey(endpoint);
-		const stored = await this.#read(endpoint);
-		if (stored) {
-			await (await this.#redis()).srem(this.#userKey(stored.userId), endpoint);
-		}
-		await (await this.#redis()).del(key);
+		const redis = await this.#redis();
+		const listed = await this.#removeFromUser(redis, userId, [
+			[endpoint, undefined],
+		]);
+		const dropped = await this.#dropOwned(redis, userId, endpoint, undefined);
+		return listed > 0 || dropped;
 	}
 
 	/**
-	 * Read a stored record, treating an unusable one as absent.
-	 *
-	 * Throwing here would make one corrupted key break `listByUser` for the
-	 * whole account; absent means the endpoint is pruned from the set instead,
-	 * and the browser re-subscribes on its next visit.
+	 * Delete the record of `endpoint` if `userId` owns it and, when `score` is
+	 * a stamp, it is the save that stamp was given to.
 	 */
-	async #read(endpoint: string): Promise<StoredSubscription | undefined> {
-		const raw = await (await this.#redis()).get(
-			this.#subscriptionKey(endpoint),
-		);
-		if (raw === null) return undefined;
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(raw);
-		} catch {
-			return undefined;
+	async #dropOwned(
+		redis: SubscriptionRedisClient,
+		userId: string,
+		endpoint: string,
+		score: number | undefined,
+	): Promise<boolean> {
+		const key = this.#subscriptionKey(endpoint);
+		for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+			const raw = await redis.get(key);
+			const stored = raw === null ? undefined : parseRecord(endpoint, raw);
+			if (raw === null || !stored || stored.userId !== userId) return false;
+			if (score !== undefined && score !== 0 && stored.createdAt !== score) {
+				return false;
+			}
+			if (await this.#swap(redis, key, raw, null)) return true;
 		}
-		return readRecord(endpoint, parsed);
+		throw busy();
 	}
+
+	/** Write `next` (or delete, for null) if the record still holds `read`. */
+	async #swap(
+		redis: SubscriptionRedisClient,
+		key: string,
+		read: string | null,
+		next: string | null,
+	): Promise<boolean> {
+		const swapped = await redis.eval(
+			SWAP_RECORD,
+			1,
+			key,
+			read === null ? "0" : "1",
+			read ?? "",
+			next === null ? "del" : "set",
+			next ?? "",
+		);
+		return Number(swapped) === 1;
+	}
+
+	async #addToUser(
+		redis: SubscriptionRedisClient,
+		userId: string,
+		endpoint: string,
+		stamp: number,
+		max: number,
+	): Promise<Member[]> {
+		return pairs(
+			await redis.eval(
+				ADD_TO_USER,
+				1,
+				this.#userKey(userId),
+				endpoint,
+				String(stamp),
+				String(max),
+			),
+		);
+	}
+
+	async #removeFromUser(
+		redis: SubscriptionRedisClient,
+		userId: string,
+		members: readonly Member[],
+	): Promise<number> {
+		const args = members.flatMap(([endpoint, score]) => [
+			endpoint,
+			score === undefined ? "" : String(score),
+		]);
+		return Number(
+			await redis.eval(REMOVE_FROM_USER, 1, this.#userKey(userId), ...args),
+		);
+	}
+}
+
+/** A `ZRANGE ... WITHSCORES` reply as endpoint and score pairs. */
+function pairs(reply: unknown): Member[] {
+	if (!Array.isArray(reply)) return [];
+	const members: Member[] = [];
+	for (let i = 0; i + 1 < reply.length; i += 2) {
+		const endpoint: unknown = reply[i];
+		const score = Number(reply[i + 1]);
+		if (typeof endpoint === "string" && Number.isFinite(score)) {
+			members.push([endpoint, score]);
+		}
+	}
+	return members;
+}
+
+function busy(): NovaError {
+	return new NovaError(
+		"E_NOVA_STORE_BUSY",
+		`A subscription changed under every one of ${ATTEMPTS} attempts to write it.`,
+		{
+			hint: "Something rewrites this endpoint's record continuously; retry later.",
+		},
+	);
+}
+
+/**
+ * Read a stored record, treating an unusable one as absent.
+ *
+ * Throwing here would make one corrupted key break `listByUser` for the
+ * whole account; absent means the endpoint is pruned from the set instead,
+ * and the browser re-subscribes on its next visit.
+ */
+function parseRecord(
+	endpoint: string,
+	raw: string,
+): StoredSubscription | undefined {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return undefined;
+	}
+	return readRecord(endpoint, parsed);
 }
 
 /**

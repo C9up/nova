@@ -13,11 +13,7 @@ import { RedisSubscriptionStore } from "../../src/RedisSubscriptionStore.js";
 /** The six commands the subscription store issues. */
 const CLIENT = {
 	get: async () => null,
-	set: async () => "OK",
-	del: async () => 0,
-	sadd: async () => 0,
-	srem: async () => 0,
-	smembers: async () => [],
+	eval: async () => 0,
 };
 
 describe("nova > resolving a quasar connection", () => {
@@ -54,12 +50,12 @@ describe("nova > resolving a quasar connection", () => {
 	});
 
 	it("names the commands a connection is missing rather than failing on the first subscribe", async () => {
-		const { smembers: _dropped, ...partial } = CLIENT;
+		const { eval: _dropped, ...partial } = CLIENT;
 		withQuasar(partial);
 
 		await expect(resolve("main")).rejects.toMatchObject({
 			code: "E_NOVA_REDIS_INCOMPLETE",
-			message: /smembers/,
+			message: /eval/,
 		});
 	});
 

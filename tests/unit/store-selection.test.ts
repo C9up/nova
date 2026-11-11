@@ -155,11 +155,7 @@ describe("nova > store selection", () => {
 			stores.redis({
 				connection: {
 					get: async () => null,
-					set: async () => "OK",
-					del: async () => 0,
-					sadd: async () => 0,
-					srem: async () => 0,
-					smembers: async () => [],
+					eval: async () => 0,
 				},
 			})(),
 		).toBeInstanceOf(RedisSubscriptionStore);

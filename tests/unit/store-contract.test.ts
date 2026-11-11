@@ -1,5 +1,6 @@
 /**
- * Rules every store keeps the same way, run against all four.
+ * Rules every store keeps the same way, run against all four: the Redis one
+ * where `REDIS_TEST_URL` names a server (see `__helpers__/redis.ts`).
  */
 
 import { mkdtemp, rm } from "node:fs/promises";
@@ -14,7 +15,13 @@ import {
 	type SubscriptionStore,
 } from "../../src/index.js";
 import { SubscribeController } from "../../src/SubscribeController.js";
-import { FakeRedis, sqliteConnection } from "../__helpers__/stores.js";
+import {
+	dropPrefix,
+	freshPrefix,
+	RespClient,
+	redisUrl,
+} from "../__helpers__/redis.js";
+import { sqliteConnection } from "../__helpers__/stores.js";
 import {
 	realAuth,
 	realP256dh,
@@ -47,7 +54,22 @@ const STORES: ReadonlyArray<
 			return new SqlSubscriptionStore(db);
 		},
 	],
-	["redis", async () => new RedisSubscriptionStore(new FakeRedis())],
+	...(redisUrl === ""
+		? []
+		: [
+				[
+					"redis",
+					async () => {
+						const client = await RespClient.open(redisUrl);
+						const prefix = freshPrefix("contract");
+						cleanups.push(async () => {
+							await dropPrefix(client, prefix);
+							await client.close();
+						});
+						return new RedisSubscriptionStore(client, { prefix });
+					},
+				] as const,
+			]),
 ];
 
 describe.each(STORES)("%s store — taking over an endpoint", (_name, make) => {

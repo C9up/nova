@@ -239,9 +239,16 @@ redis: stores.redis({ connection: 'main' })
 
 A `@c9up/quasar` connection name, resolved when the store is first used — nova
 never imports quasar, which stays optional, and says so plainly if it is absent.
-Pass a client (or a function answering one) instead to use any ioredis- or
-node-redis-shaped client. Keys are prefixed `nova:push`; pass `prefix` to run
-two applications against one database.
+Pass a client (or a function answering one) instead to use any client that
+answers `get` and `eval` the way ioredis does. Keys are prefixed `nova:push`;
+pass `prefix` to run two applications against one database.
+
+Every write is a script the server runs whole, on one key, so the per-user cap
+and the owner checks hold across processes sharing the server, and a Redis
+Cluster serves each script from the node holding its key. A subscription is a
+string key per endpoint; a user's endpoints are a sorted set by save time. A
+store written by an earlier version kept them in a plain set: it is converted
+in place the first time it is touched.
 
 Durability is the server's: a Redis with no persistence loses subscriptions on
 restart. Browsers re-subscribe on their next visit, so the cost is a missed

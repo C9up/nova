@@ -126,9 +126,10 @@ export class SubscribeController {
 	/**
 	 * `DELETE {routePrefix}/subscribe` with `{ endpoint }`: detach this
 	 * browser from the signed-in account, on logout. Only the caller's own
-	 * subscription is removed — the store's `delete` removes an endpoint
-	 * whoever holds it, so ownership is checked first, and another user's
-	 * endpoint answers 404 exactly like one that does not exist.
+	 * subscription is removed, through the store's owner-scoped
+	 * `deleteForUser` — never the global `delete`, which a takeover landing
+	 * between a check and the call would turn against the new owner. Another
+	 * user's endpoint answers 404 exactly like one that does not exist.
 	 */
 	async unsubscribe(ctx: SubscribeContext): Promise<void> {
 		const endpoint = endpointOf(ctx.request.body());
@@ -142,8 +143,7 @@ export class SubscribeController {
 			return;
 		}
 		const userId = authenticatedUserId(ctx);
-		const held = await this.#store.listByUser(userId);
-		if (!held.some((subscription) => subscription.endpoint === endpoint)) {
+		if (!(await this.#store.deleteForUser(userId, endpoint))) {
 			ctx.response.status(404).json({
 				error: {
 					code: "E_NOVA_SUBSCRIPTION_NOT_FOUND",
@@ -152,7 +152,6 @@ export class SubscribeController {
 			});
 			return;
 		}
-		await this.#store.delete(endpoint);
 		ctx.response.status(200).json({ ok: true, endpoint });
 	}
 }

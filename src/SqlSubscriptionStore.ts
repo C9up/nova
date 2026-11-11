@@ -242,6 +242,17 @@ export class SqlSubscriptionStore implements SubscriptionStore {
 			[endpoint],
 		);
 	}
+
+	/** Ownership is part of the `WHERE`, so the check and the removal are one statement. */
+	async deleteForUser(userId: string, endpoint: string): Promise<boolean> {
+		const db = await this.#db();
+		const { rowsAffected } = await db.execute(
+			`DELETE FROM ${this.#table} WHERE endpoint = ${this.#placeholder(db, 1)} ` +
+				`AND user_id = ${this.#placeholder(db, 2)}`,
+			[endpoint, userId],
+		);
+		return rowsAffected > 0;
+	}
 }
 
 function toEpochMs(value: number | string | null): number | null {

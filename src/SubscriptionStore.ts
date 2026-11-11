@@ -41,7 +41,15 @@ export interface SubscriptionStore {
 		options?: SaveSubscriptionOptions,
 	): Promise<void>;
 	listByUser(userId: string): Promise<PushSubscription[]>;
+	/** Forget `endpoint` whoever holds it — the push service said it is gone. */
 	delete(endpoint: string): Promise<void>;
+	/**
+	 * Forget `endpoint` only if `userId` holds it, in one step, and answer
+	 * whether it did. What a user-facing route calls: checking ownership and
+	 * then calling `delete` leaves a window in which the endpoint moves to
+	 * another account, whose row the global delete then removes.
+	 */
+	deleteForUser(userId: string, endpoint: string): Promise<boolean>;
 }
 
 export class MemorySubscriptionDriver implements SubscriptionStore {
@@ -102,6 +110,13 @@ export class MemorySubscriptionDriver implements SubscriptionStore {
 
 	async delete(endpoint: string): Promise<void> {
 		this.#remove(endpoint);
+	}
+
+	async deleteForUser(userId: string, endpoint: string): Promise<boolean> {
+		const bucket = this.#byUser.get(userId);
+		if (!bucket?.delete(endpoint)) return false;
+		if (bucket.size === 0) this.#byUser.delete(userId);
+		return true;
 	}
 
 	#remove(endpoint: string): void {

@@ -272,6 +272,26 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 		await this.#serial(() => this.#forget(endpoint));
 	}
 
+	/**
+	 * Forget `endpoint` if `userId` holds it.
+	 *
+	 * Queued with every other write of this instance, so a takeover arriving
+	 * through the same process cannot land between the check and the removal.
+	 * The user's own set is emptied first: `srem` on it is atomic and cannot
+	 * reach another account's set, so from that command on no push for this
+	 * user goes to the endpoint, whatever another process does meanwhile.
+	 */
+	async deleteForUser(userId: string, endpoint: string): Promise<boolean> {
+		return this.#serial(async () => {
+			const redis = await this.#redis();
+			const listed = await redis.srem(this.#userKey(userId), endpoint);
+			const stored = await this.#read(endpoint);
+			if (stored?.userId !== userId) return listed > 0;
+			await redis.del(this.#subscriptionKey(endpoint));
+			return true;
+		});
+	}
+
 	async #forget(endpoint: string): Promise<void> {
 		const key = this.#subscriptionKey(endpoint);
 		const stored = await this.#read(endpoint);

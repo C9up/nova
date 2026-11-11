@@ -218,3 +218,59 @@ describe("subscriptions per user — the setting", () => {
 		expect(await store.listByUser("u1")).toHaveLength(20);
 	});
 });
+
+describe.each(STORES)(
+	"%s store — removing one's own subscription",
+	(_name, make) => {
+		const endpoint = "https://fcm.googleapis.com/fcm/send/logout-device";
+
+		it("removes it for its owner and says so", async () => {
+			const store = await make();
+			await store.save("owner", subscription(endpoint));
+
+			expect(await store.deleteForUser("owner", endpoint)).toBe(true);
+			expect(await store.listByUser("owner")).toEqual([]);
+		});
+
+		it("refuses anyone else, and keeps the owner's row", async () => {
+			const store = await make();
+			await store.save("owner", subscription(endpoint));
+
+			expect(await store.deleteForUser("attacker", endpoint)).toBe(false);
+			expect(await store.listByUser("owner")).toEqual([subscription(endpoint)]);
+		});
+
+		it("answers false for an endpoint nobody holds", async () => {
+			const store = await make();
+			expect(await store.deleteForUser("owner", endpoint)).toBe(false);
+		});
+
+		it("never removes the endpoint once another user has taken it over", async () => {
+			// Logout on one account and login on the next, same browser, racing:
+			// the first user's DELETE must not take the second user's row with it.
+			const store = await make();
+			const controller = new SubscribeController(store);
+			const browser = subscription(endpoint);
+			await store.save("first", browser);
+
+			let status = 0;
+			await Promise.all([
+				controller.unsubscribe({
+					request: { body: () => ({ endpoint }) },
+					response: {
+						status(code: number) {
+							status = code;
+							return { json: () => {} };
+						},
+					},
+					auth: { user: { id: "first" } },
+				}),
+				store.save("second", browser),
+			]);
+
+			expect(await store.listByUser("second")).toEqual([browser]);
+			expect(await store.listByUser("first")).toEqual([]);
+			expect([200, 404]).toContain(status);
+		});
+	},
+);

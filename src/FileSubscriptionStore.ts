@@ -147,6 +147,17 @@ export class FileSubscriptionStore implements SubscriptionStore {
 		});
 	}
 
+	/** The ownership check and the removal run as one queued step. */
+	async deleteForUser(userId: string, endpoint: string): Promise<boolean> {
+		let removed = false;
+		await this.#mutate((file) => {
+			if (file.subscriptions[endpoint]?.userId !== userId) return;
+			delete file.subscriptions[endpoint];
+			removed = true;
+		});
+		return removed;
+	}
+
 	/**
 	 * Read, change, rewrite — one at a time.
 	 *

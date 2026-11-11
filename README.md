@@ -265,13 +265,14 @@ export interface SubscriptionStore {
   ): Promise<void>
   listByUser(userId: string): Promise<PushSubscription[]>
   delete(endpoint: string): Promise<void>
+  deleteForUser(userId: string, endpoint: string): Promise<boolean>
 }
 ```
 
 Wrap it in a factory and it is a store like any other:
 `mine: () => new MySubscriptionStore()`.
 
-Three rules matter, and all four shipped stores follow them.
+Four rules matter, and all four shipped stores follow them.
 
 `save` detaches the endpoint from its previous owner. A push endpoint is
 globally unique per push service, so a browser reused across a logout/login pair
@@ -286,6 +287,11 @@ answers with `409`.
 oldest, as part of the same save: concurrent saves for one user must end at the
 cap, so evict by an order every caller agrees on (age, then endpoint), and never
 leave the trimming to whoever called.
+
+`deleteForUser` removes the endpoint only if that user holds it, checking and
+removing in one step, and answers whether it did. The unsubscribe route calls it
+rather than checking `listByUser` and then calling the global `delete`: between
+the two, the browser can move to another account, whose row would go instead.
 
 And a subscription is checked against the same rules on the way in and on the
 way out: an `https` endpoint within the 768-character storage cap, an

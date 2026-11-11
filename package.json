@@ -9,7 +9,6 @@
   "files": [
     "dist",
     "stubs",
-    "migrations",
     "src"
   ],
   "exports": {

@@ -1,33 +1,64 @@
 /**
- * Migration template integrity — purely textual checks.
+ * Migration template integrity — purely textual checks, on the stub
+ * `configure` publishes.
  *
- * The template lives outside `src/` (the package keeps its main surface
- * Atlas-agnostic — the file's `import { Migration } from '@c9up/atlas'`
- * is only resolved when the user copies the file into their app, where
- * `@c9up/atlas` is installed). Nova's own typecheck excludes
- * `migrations/` (tsconfig.include = ["src"]), so we verify the contents
- * by reading the file as text.
+ * The stub is the one copy: it is what an application receives, so it is
+ * what these read. Its `import { Migration } from '@c9up/atlas'` only
+ * resolves once written into an application, where `@c9up/atlas` is
+ * installed, so the contents are checked as text.
  */
 
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const MIGRATION_PATH = path.resolve(
-	HERE,
+const ROOT = path.resolve(
+	path.dirname(fileURLToPath(import.meta.url)),
 	"..",
 	"..",
+);
+const STUB_PATH = path.join(
+	ROOT,
+	"stubs",
+	"database",
 	"migrations",
-	"create_push_subscriptions.ts",
+	"0048_create_push_subscriptions.stub",
 );
 
-describe("migrations/create_push_subscriptions.ts — template integrity", () => {
+/** The stub without its `---` front matter: the file an application gets. */
+function body(stub: string): string {
+	const match = /^---\n[\s\S]*?\n---\n/.exec(stub);
+	return match ? stub.slice(match[0].length) : stub;
+}
+
+describe("the push_subscriptions migration has one source", () => {
+	it("ships no second copy beside the stub", async () => {
+		await expect(access(path.join(ROOT, "migrations"))).rejects.toMatchObject({
+			code: "ENOENT",
+		});
+		const manifest: unknown = JSON.parse(
+			await readFile(path.join(ROOT, "package.json"), "utf8"),
+		);
+		const files =
+			typeof manifest === "object" && manifest !== null && "files" in manifest
+				? manifest.files
+				: undefined;
+		expect(files).not.toContain("migrations");
+	});
+});
+
+describe("0048_create_push_subscriptions.stub — template integrity", () => {
 	let template: string;
 
 	beforeAll(async () => {
-		template = await readFile(MIGRATION_PATH, "utf8");
+		template = body(await readFile(STUB_PATH, "utf8"));
+	});
+
+	it("says what the store writes into the timestamp columns", () => {
+		// SqlSubscriptionStore writes CURRENT_TIMESTAMP on every dialect.
+		expect(template).not.toMatch(/NOW\(\) for mysql/);
+		expect(template).toMatch(/CURRENT_TIMESTAMP on every dialect/);
 	});
 
 	it("imports Migration from @c9up/atlas", () => {
@@ -52,7 +83,7 @@ describe("migrations/create_push_subscriptions.ts — template integrity", () =>
 	});
 
 	it("declares endpoint with the 768-char InnoDB-utf8mb4-safe budget", () => {
-		// 768 chars × 4 bytes/char = 3072 bytes, exactly at the MySQL InnoDB
+		// 768 chars x 4 bytes/char = 3072 bytes, exactly at the MySQL InnoDB
 		// utf8mb4 (DYNAMIC row format) index limit. See AUDIT-migration-templates.md.
 		expect(template).toMatch(/\.string\(['"]endpoint['"]\s*,\s*768\)/);
 	});

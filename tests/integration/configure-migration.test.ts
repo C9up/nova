@@ -30,8 +30,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  * The migration comes from a stub now, as every generated file does.
  *
  * The fail-fast case below renames THIS aside, so it has to be the file
- * `configure` actually reads — pointing it at the old `migrations/` copy would
- * make the test pass while proving nothing.
+ * `configure` actually reads — pointing it at any other copy would make the
+ * test pass while proving nothing.
  */
 const MIGRATION_PATH = path.resolve(
 	HERE,

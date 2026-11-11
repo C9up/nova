@@ -63,6 +63,41 @@ describe("nova > SqlSubscriptionStore", () => {
 		expect(found[0]?.expirationTime).toBe(42);
 	});
 
+	it("answers both of two concurrent posts of the same endpoint", async () => {
+		// Two tabs of one browser get the same PushSubscription and both POST
+		// it. Interleaved SELECT/DELETE/INSERT made the second INSERT hit the
+		// primary key, and the route answered 500 for a stored subscription.
+		const endpoint = "https://push.example/two-tabs";
+
+		const outcomes = await Promise.allSettled([
+			store.save("user-A", subscription(endpoint)),
+			store.save("user-A", subscription(endpoint)),
+			store.save("user-A", subscription(endpoint)),
+		]);
+
+		expect(outcomes.map((o) => o.status)).toEqual([
+			"fulfilled",
+			"fulfilled",
+			"fulfilled",
+		]);
+		expect(await store.listByUser("user-A")).toEqual([subscription(endpoint)]);
+	});
+
+	it("moves an endpoint whose takeover races its owner's own re-save", async () => {
+		const endpoint = "https://push.example/race-owner";
+		await store.save("user-A", subscription(endpoint));
+
+		await Promise.all([
+			store.save("user-A", subscription(endpoint, 7)),
+			store.save("user-B", subscription(endpoint, 9)),
+		]);
+
+		const a = await store.listByUser("user-A");
+		const b = await store.listByUser("user-B");
+		// One owner at the end, never both and never none.
+		expect(a.length + b.length).toBe(1);
+	});
+
 	it("deletes an endpoint whoever owns it — the 'gone' cleanup path", async () => {
 		await store.save("user-A", subscription("https://push.example/dead"));
 		await store.delete("https://push.example/dead");
@@ -112,10 +147,10 @@ describe("nova > SqlSubscriptionStore", () => {
 
 		// The SQL reaches the driver verbatim, so the placeholder shape has to
 		// match the dialect or nothing binds.
-		expect(statements[0]).toContain("WHERE endpoint = $1");
-		expect(statements[1]).toContain(
+		expect(statements[0]).toContain(
 			"VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP",
 		);
+		expect(statements[1]).toContain("WHERE user_id = $1");
 	});
 });
 
@@ -176,6 +211,73 @@ describe("nova > SqlSubscriptionStore with an Atlas-shaped connection", () => {
 		// Resolved on first use, then kept: a config file cannot await a
 		// connection that does not exist yet.
 		expect(resolvedTimes).toBe(1);
+	});
+});
+
+describe("nova > SqlSubscriptionStore > conditional writes", () => {
+	/** SQLite, with the UPDATE statements answered by `onUpdate`. */
+	function withUpdates(
+		onUpdate: (
+			run: () => Promise<{ rowsAffected: number }>,
+		) => Promise<{ rowsAffected: number }>,
+	): SubscriptionDatabase {
+		const inner = sqliteConnection();
+		return {
+			dialect: "sqlite",
+			execute: (sql, params) =>
+				sql.startsWith("UPDATE")
+					? onUpdate(() => inner.execute(sql, params))
+					: inner.execute(sql, params),
+			query: inner.query.bind(inner),
+		};
+	}
+
+	it("takes an identical rewrite that reports no changed row as stored", async () => {
+		// MySQL counts changed rows: the same values in the same second say 0.
+		const store = new SqlSubscriptionStore(
+			withUpdates(async (run) => {
+				await run();
+				return { rowsAffected: 0 };
+			}),
+		);
+		const sent = subscription("https://push.example/identical");
+		await store.save("user-A", sent);
+
+		await expect(store.save("user-A", sent)).resolves.toBeUndefined();
+		expect(await store.listByUser("user-A")).toEqual([sent]);
+	});
+
+	it("gives up with a conflict when every conditional write loses", async () => {
+		let attempts = 0;
+		const store = new SqlSubscriptionStore(
+			withUpdates(async () => {
+				attempts += 1;
+				return { rowsAffected: 0 };
+			}),
+		);
+		const endpoint = "https://push.example/contended";
+		await store.save("user-A", subscription(endpoint));
+
+		await expect(
+			store.save("user-A", subscription(endpoint, 5)),
+		).rejects.toMatchObject({ code: "E_NOVA_SUBSCRIPTION_CONFLICT" });
+		expect(attempts).toBe(5);
+	});
+
+	it("rethrows an insert failure that is not a lost race", async () => {
+		const inner = sqliteConnection();
+		const store = new SqlSubscriptionStore({
+			dialect: "sqlite",
+			async execute(sql, params) {
+				if (sql.startsWith("INSERT")) throw new Error("disk full");
+				return inner.execute(sql, params);
+			},
+			query: inner.query.bind(inner),
+		});
+
+		await expect(
+			store.save("user-A", subscription("https://push.example/disk")),
+		).rejects.toThrow("disk full");
 	});
 });
 

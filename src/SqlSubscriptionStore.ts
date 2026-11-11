@@ -68,12 +68,19 @@ interface SubscriptionRow {
 	expiration_time: number | string | null;
 }
 
-/** Who holds an endpoint, and with which keys. */
+/** Who holds an endpoint, with which keys and expiry. */
 interface OwnerRow {
 	user_id: string | number;
 	p256dh: string;
 	auth: string;
+	expiration_time: number | string | null;
 }
+
+/**
+ * Conditional writes a save tries before giving up. Each failure means another
+ * writer changed the row in between, so a handful covers any real contention.
+ */
+const WRITE_ATTEMPTS = 5;
 
 // The table name reaches the SQL as an identifier, where a parameter cannot go.
 // Refusing anything but a plain identifier is what keeps that safe.
@@ -121,12 +128,20 @@ export class SqlSubscriptionStore implements SubscriptionStore {
 	/**
 	 * Store a subscription for `userId`.
 	 *
-	 * The delete comes first, and it is not conditioned on the user: a push
-	 * endpoint is globally unique per push service, so a browser reused across a
-	 * logout/login pair would otherwise stay attached to BOTH accounts — and the
-	 * next notification for the old one would land on the new user's screen.
-	 * Same rule as the in-memory driver, for the same reason — and, like it,
-	 * granted only to a poster presenting the keys already stored.
+	 * One row per endpoint, whoever held it: a push endpoint is globally unique
+	 * per push service, so a browser reused across a logout/login pair would
+	 * otherwise stay attached to BOTH accounts — and the next notification for
+	 * the old one would land on the new user's screen. Same rule as the
+	 * in-memory driver, for the same reason — and, like it, granted only to a
+	 * poster presenting the keys already stored.
+	 *
+	 * Concurrent saves of one endpoint (two tabs of a browser, a logout racing
+	 * a login) are settled by the database, without a transaction the
+	 * structural connection may not offer: the row read for the ownership check
+	 * is the one the write is conditioned on. A plain `INSERT` when there was
+	 * none — the primary key refuses a second one — and an `UPDATE ... WHERE`
+	 * naming the owner and keys that were checked when there was. A write that
+	 * lost the race changes nothing, and the save reads again and re-decides.
 	 *
 	 * `CURRENT_TIMESTAMP` rather than a JavaScript date: it is standard SQL on
 	 * all three dialects, and it keeps a text-bound timestamp away from
@@ -158,11 +173,31 @@ export class SqlSubscriptionStore implements SubscriptionStore {
 		}
 
 		const db = await this.#db();
-		const [current] = await db.query<OwnerRow>(
-			`SELECT user_id, p256dh, auth FROM ${this.#table} ` +
-				`WHERE endpoint = ${this.#placeholder(db, 1)}`,
-			[subscription.endpoint],
+		for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt++) {
+			if (await this.#write(db, userId, subscription)) {
+				await this.#trim(db, userId, max);
+				return;
+			}
+		}
+		throw new NovaError(
+			"E_NOVA_SUBSCRIPTION_CONFLICT",
+			"The subscription kept changing while it was being stored.",
+			{
+				hint: "Another request was writing the same endpoint at the same time. Retry the subscribe.",
+			},
 		);
+	}
+
+	/**
+	 * One attempt at writing the row, conditioned on what was just read.
+	 * False when another writer got there in between.
+	 */
+	async #write(
+		db: SubscriptionDatabase,
+		userId: string,
+		subscription: PushSubscription,
+	): Promise<boolean> {
+		const current = await this.#owner(db, subscription.endpoint);
 		assertMayTakeOver(
 			subscription.endpoint,
 			userId,
@@ -172,22 +207,79 @@ export class SqlSubscriptionStore implements SubscriptionStore {
 			},
 			subscription.keys,
 		);
-		await this.delete(subscription.endpoint);
-		const values = [1, 2, 3, 4, 5]
-			.map((i) => this.#placeholder(db, i))
-			.join(", ");
-		await db.execute(
-			`INSERT INTO ${this.#table} (endpoint, user_id, p256dh, auth, expiration_time, created_at, updated_at) ` +
-				`VALUES (${values}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		const row = [
+			subscription.endpoint,
+			userId,
+			subscription.keys.p256dh,
+			subscription.keys.auth,
+			subscription.expirationTime,
+		];
+
+		if (current === undefined) {
+			const values = [1, 2, 3, 4, 5]
+				.map((i) => this.#placeholder(db, i))
+				.join(", ");
+			try {
+				await db.execute(
+					`INSERT INTO ${this.#table} (endpoint, user_id, p256dh, auth, expiration_time, created_at, updated_at) ` +
+						`VALUES (${values}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+					row,
+				);
+				return true;
+			} catch (error) {
+				// The driver's duplicate-key error differs per dialect; a row that
+				// now exists is what says another insert won, and anything else is
+				// a real failure.
+				if ((await this.#owner(db, subscription.endpoint)) === undefined) {
+					throw error;
+				}
+				return false;
+			}
+		}
+
+		const p = (i: number) => this.#placeholder(db, i);
+		// The re-save moves the row to the newest: `created_at` is the age the
+		// per-user cap evicts by, as the other stores re-append the record.
+		const { rowsAffected } = await db.execute(
+			`UPDATE ${this.#table} SET user_id = ${p(1)}, p256dh = ${p(2)}, auth = ${p(3)}, ` +
+				`expiration_time = ${p(4)}, created_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP ` +
+				`WHERE endpoint = ${p(5)} AND user_id = ${p(6)} AND p256dh = ${p(7)} AND auth = ${p(8)}`,
 			[
-				subscription.endpoint,
 				userId,
 				subscription.keys.p256dh,
 				subscription.keys.auth,
 				subscription.expirationTime,
+				subscription.endpoint,
+				String(current.user_id),
+				current.p256dh,
+				current.auth,
 			],
 		);
-		await this.#trim(db, userId, max);
+		if (rowsAffected > 0) return true;
+		// MySQL counts changed rows, not matched ones: rewriting identical values
+		// within the same second reports 0. The row already being what this save
+		// writes is a success, not a lost race.
+		const now = await this.#owner(db, subscription.endpoint);
+		return (
+			now !== undefined &&
+			String(now.user_id) === userId &&
+			now.p256dh === subscription.keys.p256dh &&
+			now.auth === subscription.keys.auth &&
+			toEpochMs(now.expiration_time) === subscription.expirationTime
+		);
+	}
+
+	/** Who holds `endpoint` right now, or undefined. */
+	async #owner(
+		db: SubscriptionDatabase,
+		endpoint: string,
+	): Promise<OwnerRow | undefined> {
+		const [current] = await db.query<OwnerRow>(
+			`SELECT user_id, p256dh, auth, expiration_time FROM ${this.#table} ` +
+				`WHERE endpoint = ${this.#placeholder(db, 1)}`,
+			[endpoint],
+		);
+		return current;
 	}
 
 	/**

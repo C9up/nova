@@ -8,7 +8,10 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { quasarConnection } from "../../src/quasar.js";
-import { RedisSubscriptionStore } from "../../src/RedisSubscriptionStore.js";
+import {
+	RedisSubscriptionStore,
+	type SubscriptionRedisClient,
+} from "../../src/RedisSubscriptionStore.js";
 
 /** The six commands the subscription store issues. */
 const CLIENT = {
@@ -104,5 +107,51 @@ describe("nova > the key prefix", () => {
 			expect(error).toBeInstanceOf(Error);
 			expect(error instanceof Error ? error.message : "").toContain('"a b"');
 		}
+	});
+});
+
+/**
+ * Quasar retires a connection whose retry strategy gave up and hands out a
+ * fresh one. A store that kept the first one failed every subscribe and push
+ * with "Connection is closed." until the process restarted.
+ */
+describe("nova > a connection that ended for good", () => {
+	function fakeClient(status: string) {
+		return {
+			status,
+			get: vi.fn(async (): Promise<string | null> => null),
+			eval: vi.fn(async (): Promise<unknown> => 0),
+		};
+	}
+
+	it("is resolved again on the next call", async () => {
+		const first = fakeClient("ready");
+		const second = fakeClient("ready");
+		const resolver = vi
+			.fn<() => SubscriptionRedisClient>()
+			.mockReturnValueOnce(first)
+			.mockReturnValueOnce(second);
+		const store = new RedisSubscriptionStore(resolver);
+
+		await store.delete("https://push.example/a");
+		first.status = "end";
+		await store.delete("https://push.example/a");
+
+		expect(resolver).toHaveBeenCalledTimes(2);
+		expect(second.get).toHaveBeenCalledOnce();
+	});
+
+	it("keeps a client that closed but reconnects, and one handed in directly", async () => {
+		const resolved = fakeClient("ready");
+		const resolver = vi.fn(() => resolved);
+		const store = new RedisSubscriptionStore(resolver);
+		await store.delete("https://push.example/a");
+		resolved.status = "close";
+		await store.delete("https://push.example/a");
+		expect(resolver).toHaveBeenCalledOnce();
+
+		const direct = fakeClient("end");
+		await new RedisSubscriptionStore(direct).delete("https://push.example/a");
+		expect(direct.get).toHaveBeenCalledOnce();
 	});
 });

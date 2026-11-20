@@ -55,6 +55,7 @@ import type {
 	SaveSubscriptionOptions,
 	SubscriptionStore,
 } from "./SubscriptionStore.js";
+import { hasEnded } from "./vendor/quasarConnection.js";
 
 /** Minimal Redis client — compatible with ioredis and quasar. */
 export interface SubscriptionRedisClient {
@@ -198,8 +199,17 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 		this.#prefix = prefix;
 	}
 
-	/** The client, resolved once and kept. */
+	/**
+	 * The client, resolved once and kept — until it has ended for good: quasar
+	 * retires a connection whose retry strategy gave up and hands out a fresh
+	 * one, and keeping the dead client failed every subscribe and push with
+	 * "Connection is closed." until restart. A client handed in directly is
+	 * kept whatever its state.
+	 */
 	async #redis(): Promise<SubscriptionRedisClient> {
+		if (typeof this.#source === "function" && hasEnded(this.#resolved)) {
+			this.#resolved = undefined;
+		}
 		if (this.#resolved) return this.#resolved;
 		this.#resolved =
 			typeof this.#source === "function" ? await this.#source() : this.#source;

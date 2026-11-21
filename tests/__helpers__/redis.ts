@@ -128,12 +128,16 @@ export class RespClient {
 		throw new Error(`GET answered ${String(reply)}`);
 	}
 
-	eval(
-		script: string,
+	evalsha(
+		sha1: string,
 		numKeys: number,
 		...args: Array<string | number>
 	): Promise<Reply> {
-		return this.command("EVAL", script, numKeys, ...args);
+		return this.command("EVALSHA", sha1, numKeys, ...args);
+	}
+
+	script(subcommand: "LOAD", script: string): Promise<Reply> {
+		return this.command("SCRIPT", subcommand, script);
 	}
 }
 

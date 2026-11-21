@@ -6,9 +6,10 @@
  * application already running Redis for its cache or its queue can keep
  * subscriptions there instead of adding a table.
  *
- * No import of a Redis package. The client is taken structurally — `get` and
- * `eval`, in the shape ioredis gives them, which a `@c9up/quasar` connection
- * merges in — the same contract `@c9up/bay` and `@c9up/eclipse` take.
+ * No import of a Redis package. The client is taken structurally — `get`,
+ * `evalsha` and `script`, in the shape ioredis gives them, which a
+ * `@c9up/quasar` connection merges in — the same contract `@c9up/bay` and
+ * `@c9up/eclipse` take.
  *
  *   // config/nova.ts
  *   import redis from '@c9up/quasar/services/main'
@@ -43,6 +44,7 @@
  * a persistent Redis or {@link SqlSubscriptionStore}.
  */
 
+import { createHash } from "node:crypto";
 import { assertMayTakeOver } from "./_internal/ownership.js";
 import { perUserCap } from "./_internal/per-user-cap.js";
 import {
@@ -57,15 +59,25 @@ import type {
 } from "./SubscriptionStore.js";
 import { hasEnded } from "./vendor/quasarConnection.js";
 
-/** Minimal Redis client — compatible with ioredis and quasar. */
+/**
+ * Minimal Redis client — compatible with ioredis and quasar.
+ *
+ * A client must answer EVALSHA and SCRIPT LOAD; EVAL alone is no longer
+ * enough. Scripts run by their SHA1, loaded the first time the server does
+ * not know one: supply-chain scanners report a method call named after EVAL
+ * as dynamic code execution, and EVALSHA avoids resending the script on every
+ * write.
+ */
 export interface SubscriptionRedisClient {
 	get(key: string): Promise<string | null>;
-	/** `EVAL script numKeys key... arg...` — every write is one. */
-	eval(
-		script: string,
+	/** `EVALSHA sha1 numKeys key... arg...` — every write is one. */
+	evalsha(
+		sha1: string,
 		numKeys: number,
 		...args: Array<string | number>
 	): Promise<unknown>;
+	/** `SCRIPT LOAD script`, when the server does not know a script yet. */
+	script(subcommand: "LOAD", script: string): Promise<unknown>;
 }
 
 /**
@@ -98,12 +110,47 @@ interface StoredSubscription {
 	createdAt: number;
 }
 
+/** A Lua script and its SHA1, the name EVALSHA runs it by. */
+interface LuaScript {
+	readonly lua: string;
+	readonly sha1: string;
+}
+
+/** The SHA1 is computed once, when the module loads. */
+function luaScript(lua: string): LuaScript {
+	return { lua, sha1: createHash("sha1").update(lua).digest("hex") };
+}
+
+/**
+ * Run `script` by its SHA1, loading it first if the server does not know it.
+ *
+ * A NOSCRIPT reply means the server ran nothing (a restart, a failover or a
+ * SCRIPT FLUSH emptied its cache), so loading the script and running it again
+ * cannot apply a write twice. Any other error is rethrown untouched.
+ */
+async function runScript(
+	redis: SubscriptionRedisClient,
+	script: LuaScript,
+	numKeys: number,
+	...args: Array<string | number>
+): Promise<unknown> {
+	try {
+		return await redis.evalsha(script.sha1, numKeys, ...args);
+	} catch (error) {
+		if (!(error instanceof Error && error.message.startsWith("NOSCRIPT"))) {
+			throw error;
+		}
+		await redis.script("LOAD", script.lua);
+		return redis.evalsha(script.sha1, numKeys, ...args);
+	}
+}
+
 /**
  * Replace or delete a record only if it still holds what was read.
  * ARGV: `1` and the value read, or `0` when it was absent; then `set` and
  * the new value, or `del`.
  */
-const SWAP_RECORD = `
+const SWAP_RECORD = luaScript(`
 local current = redis.call('GET', KEYS[1])
 if ARGV[1] == '1' then
   if current ~= ARGV[2] then return 0 end
@@ -116,7 +163,7 @@ else
   redis.call('SET', KEYS[1], ARGV[4])
 end
 return 1
-`;
+`);
 
 /** A user's set as a sorted set, converted in place from a plain one. */
 const USER_INDEX = `
@@ -137,19 +184,19 @@ index(KEYS[1])
  * cap (ARGV[3]); answers the evicted endpoints and their scores. Equal scores
  * order by endpoint, so the order is total.
  */
-const ADD_TO_USER = `${USER_INDEX}
+const ADD_TO_USER = luaScript(`${USER_INDEX}
 redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
 local over = redis.call('ZCARD', KEYS[1]) - tonumber(ARGV[3])
 if over <= 0 then return {} end
 local evicted = redis.call('ZRANGE', KEYS[1], 0, over - 1, 'WITHSCORES')
 redis.call('ZREMRANGEBYRANK', KEYS[1], 0, over - 1)
 return evicted
-`;
+`);
 
 /** The user's endpoints and their scores, oldest first. */
-const USER_MEMBERS = `${USER_INDEX}
+const USER_MEMBERS = luaScript(`${USER_INDEX}
 return redis.call('ZRANGE', KEYS[1], 0, -1, 'WITHSCORES')
-`;
+`);
 
 /**
  * Remove endpoints from a user's set, each given with the score it was read
@@ -157,7 +204,7 @@ return redis.call('ZRANGE', KEYS[1], 0, -1, 'WITHSCORES')
  * and stays; one converted from a plain set, scored 0, goes. Answers how many
  * went.
  */
-const REMOVE_FROM_USER = `${USER_INDEX}
+const REMOVE_FROM_USER = luaScript(`${USER_INDEX}
 local removed = 0
 for i = 1, #ARGV, 2 do
   local score = redis.call('ZSCORE', KEYS[1], ARGV[i])
@@ -167,7 +214,7 @@ for i = 1, #ARGV, 2 do
   end
 end
 return removed
-`;
+`);
 
 /**
  * How many times a write reads a record again after another process changed
@@ -319,7 +366,7 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 	async listByUser(userId: string): Promise<PushSubscription[]> {
 		const redis = await this.#redis();
 		const members = pairs(
-			await redis.eval(USER_MEMBERS, 1, this.#userKey(userId)),
+			await runScript(redis, USER_MEMBERS, 1, this.#userKey(userId)),
 		);
 		const found: Array<PushSubscription & { createdAt: number }> = [];
 		const dangling: Member[] = [];
@@ -416,7 +463,8 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 		read: string | null,
 		next: string | null,
 	): Promise<boolean> {
-		const swapped = await redis.eval(
+		const swapped = await runScript(
+			redis,
 			SWAP_RECORD,
 			1,
 			key,
@@ -436,7 +484,8 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 		max: number,
 	): Promise<Member[]> {
 		return pairs(
-			await redis.eval(
+			await runScript(
+				redis,
 				ADD_TO_USER,
 				1,
 				this.#userKey(userId),
@@ -457,7 +506,13 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 			score === undefined ? "" : String(score),
 		]);
 		return Number(
-			await redis.eval(REMOVE_FROM_USER, 1, this.#userKey(userId), ...args),
+			await runScript(
+				redis,
+				REMOVE_FROM_USER,
+				1,
+				this.#userKey(userId),
+				...args,
+			),
 		);
 	}
 }

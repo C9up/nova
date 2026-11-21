@@ -13,10 +13,11 @@ import {
 	type SubscriptionRedisClient,
 } from "../../src/RedisSubscriptionStore.js";
 
-/** The six commands the subscription store issues. */
+/** The three commands the subscription store issues. */
 const CLIENT = {
 	get: async () => null,
-	eval: async () => 0,
+	evalsha: async () => 0,
+	script: async () => "",
 };
 
 describe("nova > resolving a quasar connection", () => {
@@ -53,12 +54,12 @@ describe("nova > resolving a quasar connection", () => {
 	});
 
 	it("names the commands a connection is missing rather than failing on the first subscribe", async () => {
-		const { eval: _dropped, ...partial } = CLIENT;
+		const { script: _dropped, ...partial } = CLIENT;
 		withQuasar(partial);
 
 		await expect(resolve("main")).rejects.toMatchObject({
 			code: "E_NOVA_REDIS_INCOMPLETE",
-			message: /eval/,
+			message: /script/,
 		});
 	});
 
@@ -120,7 +121,8 @@ describe("nova > a connection that ended for good", () => {
 		return {
 			status,
 			get: vi.fn(async (): Promise<string | null> => null),
-			eval: vi.fn(async (): Promise<unknown> => 0),
+			evalsha: vi.fn(async (): Promise<unknown> => 0),
+			script: vi.fn(async (): Promise<unknown> => ""),
 		};
 	}
 

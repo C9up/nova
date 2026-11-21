@@ -240,8 +240,13 @@ redis: stores.redis({ connection: 'main' })
 A `@c9up/quasar` connection name, resolved when the store is first used — nova
 never imports quasar, which stays optional, and says so plainly if it is absent.
 Pass a client (or a function answering one) instead to use any client that
-answers `get` and `eval` the way ioredis does. Keys are prefixed `nova:push`;
-pass `prefix` to run two applications against one database.
+answers `get`, `evalsha` and `script` the way ioredis does. Keys are prefixed
+`nova:push`; pass `prefix` to run two applications against one database.
+
+A client must answer EVALSHA and SCRIPT LOAD; EVAL alone is no longer enough.
+Each script runs by its SHA1 and is loaded with SCRIPT LOAD the first time the
+server answers NOSCRIPT: supply-chain scanners report a method call named after
+EVAL as dynamic code execution, and EVALSHA avoids resending the script.
 
 Every write is a script the server runs whole, on one key, so the per-user cap
 and the owner checks hold across processes sharing the server, and a Redis

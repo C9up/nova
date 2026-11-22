@@ -143,6 +143,14 @@ export class RespClient {
 
 const url = process.env.REDIS_TEST_URL ?? "";
 
+if (url === "" && process.env.CI === "true") {
+	// CI always starts a Redis: a missing URL there means the suites below
+	// would skip in silence, which is how a broken integration job looks green.
+	throw new Error(
+		"REDIS_TEST_URL is not set on CI: refusing to skip the live-Redis suite.",
+	);
+}
+
 if (url !== "") {
 	// Set means meant: a server that does not answer is a failure, not a skip.
 	const probe = await RespClient.open(url).catch((cause: unknown) => {

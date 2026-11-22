@@ -1,13 +1,11 @@
 /**
  * Nova — Web Push delivery API.
  *
- * web-push builds the request — VAPID JWT, aes128gcm encryption, the protocol
- * headers — with per-call `vapidDetails` (no global setVapidDetails, so Nova
- * instances stay independent). It does not send it: web-push's transport
- * follows the endpoint anywhere, reads the whole response into a string and
- * waits without a deadline, and the endpoint is a URL any account chooses.
- * The request goes out through a guarded client instead (see
- * `_internal/http.ts`): non-public addresses refused at connect time, the
+ * Nova builds the request itself on `node:crypto` — VAPID JWT, aes128gcm
+ * encryption, the protocol headers (see `_internal/webpush.ts`) — from the
+ * instance's own VAPID config, so instances stay independent. The endpoint is
+ * a URL any account chooses, so the request goes out through a guarded client
+ * (see `_internal/http.ts`): non-public addresses refused at connect time, the
  * response read up to {@link MAX_RESPONSE_BYTES}, a deadline on the exchange.
  *
  * Every answer from the endpoint — a status, or no answer in time — is a
@@ -18,7 +16,6 @@
  * can't abort delivery to the rest.
  */
 
-import webpush from "web-push";
 import {
 	defaultHttpClient,
 	type PushHttpClient,
@@ -33,6 +30,10 @@ import {
 import { keysProblem } from "./_internal/subscription.js";
 import { pushToUserKey } from "./_internal/user-id.js";
 import { validateVapidConfig } from "./_internal/vapid-config.js";
+import {
+	buildPushRequest,
+	type PushRequestOptions,
+} from "./_internal/webpush.js";
 import type { NovaVapidConfig } from "./config.js";
 import type {
 	PushSubscription,
@@ -164,34 +165,34 @@ export class Nova {
 		const ttl = resolveTtl(options.ttl);
 		const topic = resolveTopic(options.topic);
 
-		const webpushOptions: webpush.RequestOptions = {
-			vapidDetails: {
+		const requestOptions: PushRequestOptions = {
+			vapid: {
 				subject: vapid.subject,
 				publicKey: vapid.publicKey,
 				privateKey: vapid.privateKey,
 			},
-			TTL: ttl,
-			contentEncoding: "aes128gcm",
+			ttl,
 		};
-		if (options.urgency) webpushOptions.urgency = options.urgency;
-		if (topic !== undefined) webpushOptions.topic = topic;
+		if (options.urgency) requestOptions.urgency = options.urgency;
+		if (topic !== undefined) requestOptions.topic = topic;
 
 		// Checked again at send time: a row may predate the rule, or the list.
 		const refusal = pushTargetProblem(endpoint, this.#targets);
 		if (refusal !== null) return refused(endpoint, refusal);
 		// Keys nothing can be encrypted for never become deliverable, and no
 		// push service will ever answer 410 for them: forget them now.
-		const unusable = keysProblem(
-			subscription.keys?.p256dh,
-			subscription.keys?.auth,
-		);
-		if (unusable !== null) return await this.#forget(endpoint, 0, unusable);
+		const p256dh = subscription.keys?.p256dh;
+		const auth = subscription.keys?.auth;
+		const unusable = keysProblem(p256dh, auth);
+		if (unusable !== null || p256dh === undefined || auth === undefined) {
+			return await this.#forget(endpoint, 0, unusable ?? "no keys");
+		}
 
 		const plaintext = JSON.stringify(payload);
 		const size = Buffer.byteLength(plaintext);
 		if (size > MAX_PLAINTEXT_BYTES) {
-			// web-push would split it into several records, which RFC 8291 §4
-			// forbids: the push service answers 413, or the browser cannot decrypt.
+			// It would take several records, which RFC 8291 §4 forbids: the push
+			// service answers 413, or the browser cannot decrypt.
 			console.warn(
 				`[nova] push to ${hostOf(endpoint)} not sent: the payload is ${size} bytes, over the ${MAX_PLAINTEXT_BYTES} one record holds`,
 			);
@@ -204,18 +205,11 @@ export class Nova {
 			};
 		}
 
-		const request = webpush.generateRequestDetails(
-			subscription,
+		const request = buildPushRequest(
+			{ endpoint, keys: { p256dh, auth } },
 			plaintext,
-			webpushOptions,
+			requestOptions,
 		);
-		const headers: Record<string, string> = {};
-		// web-push types its header values as strings and sets numbers (TTL,
-		// Content-Length); the client sets its own content-length.
-		for (const [name, value] of Object.entries(request.headers)) {
-			if (name.toLowerCase() === "content-length") continue;
-			headers[name.toLowerCase()] = String(value);
-		}
 
 		const http = await this.#client();
 		let status: number;
@@ -223,8 +217,8 @@ export class Nova {
 		try {
 			const response = await http.request(endpoint, {
 				method: request.method,
-				headers,
-				body: request.body ?? undefined,
+				headers: request.headers,
+				body: request.body,
 				timeout: this.#timeout,
 				maxResponseBytes: MAX_RESPONSE_BYTES,
 			});
@@ -247,7 +241,7 @@ export class Nova {
 				cleaned: false,
 			};
 		}
-		// What web-push treats as delivered: any 2xx (RFC 8030 §5 answers 201).
+		// Delivered: any 2xx (RFC 8030 §5 answers 201).
 		if (status >= 200 && status <= 299) return { ok: true, status, endpoint };
 		const result = await this.#mapError(status, endpoint);
 		// RFC 8030 §8.4 pairs Retry-After with 429; RFC 9110 §10.2.3 with 503.

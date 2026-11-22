@@ -2,7 +2,7 @@
  * FakeNova — in-memory test double for the `Nova` class shipped in 48.2.
  *
  * Captures every `push` / `pushToUser` call into an internal array; never
- * touches `web-push`, never validates VAPID, never reads `SubscriptionStore`.
+ * encrypts or signs anything, never validates VAPID, never reads `SubscriptionStore`.
  * Apps that need real fan-out semantics (one PushResult per device, 410
  * cleanup) construct a real `Nova` against a `MemorySubscriptionDriver`
  * pre-loaded with fixtures — that path runs the actual delivery logic.

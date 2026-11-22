@@ -4,7 +4,7 @@
  * Verifies: capture shape, defensive snapshot in getPushed(), predicate
  * forms (object + function), `containing` substring matcher (incl.
  * empty-needle guard), assertion error-message richness, reset
- * behaviour. No `web-push`, no network, no SubscriptionStore touched.
+ * behaviour. No encryption, no network, no SubscriptionStore touched.
  */
 
 import { describe, expect, it, vi } from "vitest";

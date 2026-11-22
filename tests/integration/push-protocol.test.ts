@@ -3,8 +3,9 @@
  * Protocol-compliant outbound HTTP request (RFC 8030 / RFC 8291).
  *
  * A fake outbound client records the POST so its headers and body can be read.
- * Body is encrypted (AES-128-GCM via web-push's RFC 8188 aes128gcm path),
- * so we assert it is non-empty bytes that do NOT contain the plaintext.
+ * Body is encrypted (RFC 8291 aes128gcm, `_internal/webpush.ts`), so we
+ * assert it is non-empty bytes that do NOT contain the plaintext; the
+ * encryption itself is checked against the RFC vector in webpush.test.ts.
  */
 
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";

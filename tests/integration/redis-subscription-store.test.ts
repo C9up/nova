@@ -212,7 +212,7 @@ describeRedis(
 				auth: AUTH,
 			});
 
-			// It used to come back whole. web-push then fails on it as an
+			// It used to come back whole. The encryption then fails on it as an
 			// encryption error naming neither the key nor the endpoint, and
 			// nothing cleans it up: cleanup runs on a 404/410 from the push
 			// service, and that request was never made.

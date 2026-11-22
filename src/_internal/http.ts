@@ -3,17 +3,17 @@
  * default one.
  *
  * A push endpoint is a URL the browser hands to the server, which means anyone
- * holding an account chooses where the server sends a request. web-push's own
- * transport follows that URL anywhere, buffers whatever comes back into one
- * string and waits forever. The framework's outbound client refuses
- * non-public addresses at connect time (so a DNS answer cannot change between
- * check and connection), bounds the response and puts a deadline on the whole
- * exchange — so the request is built by web-push and sent through that client.
+ * holding an account chooses where the server sends a request. A plain
+ * transport follows that URL anywhere, buffers whatever comes back and waits
+ * forever. The framework's outbound client refuses non-public addresses at
+ * connect time (so a DNS answer cannot change between check and connection),
+ * bounds the response and puts a deadline on the whole exchange — so the
+ * request Nova builds goes out through that client.
  */
 
 import { NovaError } from "../errors.js";
 
-/** One push request, as web-push builds it. */
+/** One push request, as Nova builds it (`_internal/webpush.ts`). */
 export interface PushHttpRequest {
 	method: string;
 	headers: Record<string, string>;

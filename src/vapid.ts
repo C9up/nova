@@ -12,6 +12,7 @@
 
 import { generateKeyPairSync } from "node:crypto";
 import { decodeBase64Url, encodeBase64Url } from "./_internal/base64url.js";
+import { E_NOVA_INTERNAL } from "./errors.js";
 
 export interface VapidKeyPair {
 	/** Base64url-encoded uncompressed P-256 point (65 bytes: `0x04 || X || Y`). */
@@ -29,29 +30,29 @@ export function generateVapidKeys(): VapidKeyPair {
 	const privJwk = privateKey.export({ format: "jwk" });
 
 	if (pubJwk.kty !== "EC" || pubJwk.crv !== "P-256") {
-		throw new Error(
-			`unexpected public JWK kty/crv: ${pubJwk.kty}/${pubJwk.crv}`,
-		);
+		throw new E_NOVA_INTERNAL([
+			`public JWK kty/crv is ${pubJwk.kty}/${pubJwk.crv}`,
+		]);
 	}
 	if (privJwk.kty !== "EC" || privJwk.crv !== "P-256") {
-		throw new Error(
-			`unexpected private JWK kty/crv: ${privJwk.kty}/${privJwk.crv}`,
-		);
+		throw new E_NOVA_INTERNAL([
+			`private JWK kty/crv is ${privJwk.kty}/${privJwk.crv}`,
+		]);
 	}
 	if (typeof pubJwk.x !== "string" || typeof pubJwk.y !== "string") {
-		throw new Error("public JWK is missing x/y coordinates");
+		throw new E_NOVA_INTERNAL(["public JWK is missing x/y coordinates"]);
 	}
 	if (typeof privJwk.d !== "string") {
-		throw new Error("private JWK is missing d scalar");
+		throw new E_NOVA_INTERNAL(["private JWK is missing d scalar"]);
 	}
 
 	const x = decodeBase64Url(pubJwk.x);
 	const y = decodeBase64Url(pubJwk.y);
 	const d = decodeBase64Url(privJwk.d);
 	if (x.length !== 32 || y.length !== 32 || d.length !== 32) {
-		throw new Error(
+		throw new E_NOVA_INTERNAL([
 			`invalid scalar lengths: x=${x.length} y=${y.length} d=${d.length}`,
-		);
+		]);
 	}
 
 	const uncompressed = new Uint8Array(65);

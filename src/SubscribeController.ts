@@ -21,7 +21,12 @@ import {
 	MAX_ENDPOINT_LENGTH,
 } from "./_internal/subscription.js";
 import { normaliseUserId } from "./_internal/user-id.js";
-import { NovaError } from "./errors.js";
+import {
+	E_NOVA_INVALID_OPTION,
+	E_NOVA_INVALID_USER_ID,
+	E_NOVA_MISSING_USER,
+	E_NOVA_SUBSCRIPTION_CONFLICT,
+} from "./errors.js";
 import type {
 	PushSubscription,
 	SubscriptionStore,
@@ -68,9 +73,9 @@ export class SubscribeController {
 		const max =
 			options.maxSubscriptionsPerUser ?? DEFAULT_MAX_SUBSCRIPTIONS_PER_USER;
 		if (!Number.isSafeInteger(max) || max < 1) {
-			throw new TypeError(
-				`[nova] invalid option \`maxSubscriptionsPerUser\`: expected a positive integer, got ${String(max)}`,
-			);
+			throw new E_NOVA_INVALID_OPTION([
+				`option \`maxSubscriptionsPerUser\`: expected a positive integer, got ${String(max)}`,
+			]);
 		}
 		this.#maxPerUser = max;
 	}
@@ -107,11 +112,8 @@ export class SubscribeController {
 				maxPerUser: this.#maxPerUser,
 			});
 		} catch (error) {
-			if (
-				error instanceof NovaError &&
-				error.code === "E_NOVA_SUBSCRIPTION_CONFLICT"
-			) {
-				ctx.response.status(409).json({
+			if (error instanceof E_NOVA_SUBSCRIPTION_CONFLICT) {
+				ctx.response.status(error.status).json({
 					error: { code: error.code, message: error.message },
 				});
 				return;
@@ -160,17 +162,13 @@ export class SubscribeController {
 function authenticatedUserId(ctx: SubscribeContext): string {
 	const user = ctx.auth?.user;
 	if (user === undefined || user === null) {
-		throw new NovaError(
-			"E_NOVA_MISSING_USER",
-			"Subscription handler reached without an authenticated user. Did you disable the guard?",
-		);
+		throw new E_NOVA_MISSING_USER();
 	}
 	const userId = normaliseUserId(user.id);
 	if (userId === undefined) {
-		throw new NovaError(
-			"E_NOVA_INVALID_USER_ID",
+		throw new E_NOVA_INVALID_USER_ID([
 			"The authenticated user has no usable id: expected a non-empty string or an integer.",
-		);
+		]);
 	}
 	return userId;
 }

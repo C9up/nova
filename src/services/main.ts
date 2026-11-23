@@ -8,6 +8,7 @@
  * Populated by `NovaProvider.boot()`.
  */
 
+import { E_NOVA_NOT_BOOTED } from "../errors.js";
 import type { Nova } from "../Nova.js";
 
 let instance: Nova | undefined;
@@ -49,10 +50,7 @@ const push: Nova = new Proxy(target, {
 			return undefined;
 		}
 		if (!instance) {
-			throw new Error(
-				"[nova] Nova singleton accessed before NovaProvider.boot() ran. " +
-					"Check that `@c9up/nova/provider` is listed in your reamrc.ts providers.",
-			);
+			throw new E_NOVA_NOT_BOOTED();
 		}
 		const value = Reflect.get(instance, prop, instance);
 		return typeof value === "function" ? value.bind(instance) : value;

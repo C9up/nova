@@ -10,7 +10,7 @@
  */
 
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
-import { NovaError, RedisSubscriptionStore } from "../../src/index.js";
+import { errors, RedisSubscriptionStore } from "../../src/index.js";
 import {
 	describeRedis,
 	dropPrefix,
@@ -142,7 +142,7 @@ describeRedis("nova > RedisSubscriptionStore", () => {
 	it("refuses a prefix that cannot be a Redis key", () => {
 		expect(
 			() => new RedisSubscriptionStore(admin, { prefix: "no spaces" }),
-		).toThrow(NovaError);
+		).toThrow(errors.E_NOVA_INVALID_PREFIX);
 	});
 
 	it("converts a user's set an earlier version wrote, oldest first", async () => {

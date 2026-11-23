@@ -9,15 +9,17 @@
  * subscribes arrive at once.
  */
 
+import { E_NOVA_INVALID_OPTION } from "../errors.js";
+
 export const DEFAULT_MAX_SUBSCRIPTIONS_PER_USER = 20;
 
 /** The cap a save runs under: the caller's, checked, or the default. */
 export function perUserCap(maxPerUser: number | undefined): number {
 	const max = maxPerUser ?? DEFAULT_MAX_SUBSCRIPTIONS_PER_USER;
 	if (!Number.isSafeInteger(max) || max < 1) {
-		throw new TypeError(
-			`[nova] invalid \`maxPerUser\`: expected a positive integer, got ${String(max)}`,
-		);
+		throw new E_NOVA_INVALID_OPTION([
+			`\`maxPerUser\`: expected a positive integer, got ${String(max)}`,
+		]);
 	}
 	return max;
 }

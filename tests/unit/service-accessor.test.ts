@@ -51,6 +51,9 @@ describe("nova > the service accessor before boot", () => {
 		expect(() => Reflect.get(push, "pushToUser")).toThrow(
 			/accessed before NovaProvider.boot\(\).*reamrc/s,
 		);
+		expect(() => Reflect.get(push, "pushToUser")).toThrow(
+			expect.objectContaining({ code: "E_NOVA_NOT_BOOTED" }),
+		);
 	});
 
 	it("has no singleton yet", () => {

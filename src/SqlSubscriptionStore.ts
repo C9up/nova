@@ -22,7 +22,11 @@
 import { assertMayTakeOver } from "./_internal/ownership.js";
 import { perUserCap } from "./_internal/per-user-cap.js";
 import { subscriptionProblem } from "./_internal/subscription.js";
-import { NovaError } from "./errors.js";
+import {
+	E_NOVA_INVALID_SUBSCRIPTION,
+	E_NOVA_INVALID_TABLE,
+	E_NOVA_SUBSCRIPTION_CONFLICT,
+} from "./errors.js";
 import type {
 	PushSubscription,
 	SaveSubscriptionOptions,
@@ -97,13 +101,7 @@ export class SqlSubscriptionStore implements SubscriptionStore {
 	) {
 		const table = options.table ?? "push_subscriptions";
 		if (!SAFE_TABLE.test(table)) {
-			throw new NovaError(
-				"E_NOVA_INVALID_TABLE",
-				`Invalid table name "${table}" — it reaches the SQL as an identifier, where a parameter cannot go.`,
-				{
-					hint: "Letters, digits and underscores only, not starting with a digit.",
-				},
-			);
+			throw new E_NOVA_INVALID_TABLE(table);
 		}
 		this.#source = db;
 		this.#table = table;
@@ -163,13 +161,7 @@ export class SqlSubscriptionStore implements SubscriptionStore {
 			auth: subscription.keys.auth,
 		});
 		if (problem !== null) {
-			throw new NovaError(
-				"E_NOVA_INVALID_SUBSCRIPTION",
-				`This subscription cannot be stored: ${problem}.`,
-				{
-					hint: "Subscriptions arriving through the subscribe endpoint are already checked; a hand-built one has to hold the same values a browser sends.",
-				},
-			);
+			throw new E_NOVA_INVALID_SUBSCRIPTION(problem);
 		}
 
 		const db = await this.#db();
@@ -179,13 +171,7 @@ export class SqlSubscriptionStore implements SubscriptionStore {
 				return;
 			}
 		}
-		throw new NovaError(
-			"E_NOVA_SUBSCRIPTION_CONFLICT",
-			"The subscription kept changing while it was being stored.",
-			{
-				hint: "Another request was writing the same endpoint at the same time. Retry the subscribe.",
-			},
-		);
+		throw new E_NOVA_SUBSCRIPTION_CONFLICT();
 	}
 
 	/**

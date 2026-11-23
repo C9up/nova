@@ -8,7 +8,7 @@
  * them — stays here, because that is the part a reader needs.
  */
 
-import { NovaError } from "./errors.js";
+import { E_NOVA_QUASAR_MISSING, E_NOVA_REDIS_INCOMPLETE } from "./errors.js";
 import type { SubscriptionRedisClient } from "./RedisSubscriptionStore.js";
 import {
 	hasCommands,
@@ -39,12 +39,8 @@ export async function quasarConnection(
 		what: "the subscription store",
 		alternative: "or pass a client instead of a connection name",
 		raise: (reason, message, cause) =>
-			new NovaError(
-				reason === "quasar-missing"
-					? "E_NOVA_QUASAR_MISSING"
-					: "E_NOVA_REDIS_INCOMPLETE",
-				message,
-				{ cause },
-			),
+			reason === "quasar-missing"
+				? new E_NOVA_QUASAR_MISSING([message], { cause })
+				: new E_NOVA_REDIS_INCOMPLETE([message], { cause }),
 	});
 }

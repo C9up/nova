@@ -19,7 +19,7 @@
 
 import "./augmentations.js";
 import type { NovaConfig, NovaRouteMiddleware } from "./config.js";
-import { NovaError } from "./errors.js";
+import { E_NOVA_UNKNOWN_STORE } from "./errors.js";
 import { Nova } from "./Nova.js";
 import {
 	type SubscribeContext,
@@ -181,36 +181,28 @@ export default class NovaProvider {
 		// deployment that asked for `sql` booted on the in-memory driver — the
 		// exact silent fallback this refuses one branch further down.
 		if (!stores && store === undefined && name !== undefined && name !== "") {
-			throw new NovaError(
-				"E_NOVA_UNKNOWN_STORE",
+			throw new E_NOVA_UNKNOWN_STORE(
 				`config.nova names the store '${name}', but declares no \`stores\` to pick it from.`,
-				{
-					hint: "Declare it with stores.memory(), stores.file(), stores.sql() or stores.redis(), or pass a ready-made `store` instead.",
-				},
+				"Declare it with stores.memory(), stores.file(), stores.sql() or stores.redis(), or pass a ready-made `store` instead.",
 			);
 		}
 		if (stores && name !== undefined) {
 			const selected = stores[name];
 			if (!selected) {
 				const known = Object.keys(stores);
-				throw new NovaError(
-					"E_NOVA_UNKNOWN_STORE",
+				throw new E_NOVA_UNKNOWN_STORE(
 					`config.nova names the store '${name}', which is not in \`stores\`.`,
-					{
-						hint:
-							known.length > 0
-								? `Declared: ${known.join(", ")}.`
-								: "`stores` is empty — declare one with stores.memory(), stores.file(), stores.sql() or stores.redis().",
-					},
+					known.length > 0
+						? `Declared: ${known.join(", ")}.`
+						: "`stores` is empty — declare one with stores.memory(), stores.file(), stores.sql() or stores.redis().",
 				);
 			}
 			return selected();
 		}
 		if (stores && name === undefined && store === undefined) {
-			throw new NovaError(
-				"E_NOVA_UNKNOWN_STORE",
+			throw new E_NOVA_UNKNOWN_STORE(
 				"config.nova declares `stores` but no `default` naming which one to use.",
-				{ hint: `Set default to one of: ${Object.keys(stores).join(", ")}.` },
+				`Set default to one of: ${Object.keys(stores).join(", ")}.`,
 			);
 		}
 		return store;

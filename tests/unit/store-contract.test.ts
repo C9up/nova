@@ -180,6 +180,9 @@ describe.each(STORES)("%s store — subscriptions per user", (name, make) => {
 		await expect(
 			store.save("u1", subscription(endpointOf(300)), { maxPerUser: max }),
 		).rejects.toThrow(/maxPerUser/);
+		await expect(
+			store.save("u1", subscription(endpointOf(300)), { maxPerUser: max }),
+		).rejects.toMatchObject({ code: "E_NOVA_INVALID_OPTION" });
 		expect(await store.listByUser("u1")).toEqual([]);
 	});
 
@@ -223,6 +226,12 @@ describe("subscriptions per user — the setting", () => {
 					maxSubscriptionsPerUser: max,
 				}),
 		).toThrow(/maxSubscriptionsPerUser/);
+		expect(
+			() =>
+				new SubscribeController(new MemorySubscriptionDriver(), {
+					maxSubscriptionsPerUser: max,
+				}),
+		).toThrow(expect.objectContaining({ code: "E_NOVA_INVALID_OPTION" }));
 	});
 
 	it("defaults to 20", async () => {

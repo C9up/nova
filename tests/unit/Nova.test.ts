@@ -380,6 +380,9 @@ describe("Nova > push() — ttl/topic validation (review patches)", () => {
 		await expect(
 			nova.push(SUB_A, PAYLOAD, { ttl: Number.NaN }),
 		).rejects.toThrow(/invalid push option `ttl`/);
+		await expect(
+			nova.push(SUB_A, PAYLOAD, { ttl: Number.NaN }),
+		).rejects.toMatchObject({ code: "E_NOVA_INVALID_OPTION" });
 	});
 
 	it("throws on negative ttl", async () => {
@@ -408,6 +411,9 @@ describe("Nova > push() — ttl/topic validation (review patches)", () => {
 		await expect(
 			nova.push(SUB_A, PAYLOAD, { topic: "news/breaking" }),
 		).rejects.toThrow(/invalid push option `topic`/);
+		await expect(
+			nova.push(SUB_A, PAYLOAD, { topic: "news/breaking" }),
+		).rejects.toMatchObject({ code: "E_NOVA_INVALID_OPTION" });
 	});
 
 	it("accepts topic of exactly 32 base64url chars", async () => {
@@ -538,6 +544,12 @@ describe("Nova > push() — only push services are contacted", () => {
 						pushServices: [entry],
 					}),
 			).toThrow(/pushServices/);
+			expect(
+				() =>
+					new Nova(new MemorySubscriptionDriver(), VALID_VAPID, {
+						pushServices: [entry],
+					}),
+			).toThrow(expect.objectContaining({ code: "E_NOVA_INVALID_OPTION" }));
 		},
 	);
 });
@@ -693,6 +705,9 @@ describe("Nova > pushToUser() — user ids", () => {
 	])("refuses %s rather than looking up a made-up id", async (_label, id) => {
 		const { nova } = makeNova();
 		await expect(nova.pushToUser(id, PAYLOAD)).rejects.toThrow(/not a user id/);
+		await expect(nova.pushToUser(id, PAYLOAD)).rejects.toMatchObject({
+			code: "E_NOVA_INVALID_USER_ID",
+		});
 	});
 });
 
@@ -774,5 +789,9 @@ describe("Nova > pushToUser() — bounded fan-out", () => {
 			() =>
 				new Nova(new MemorySubscriptionDriver(), VALID_VAPID, { concurrency }),
 		).toThrow(/concurrency/);
+		expect(
+			() =>
+				new Nova(new MemorySubscriptionDriver(), VALID_VAPID, { concurrency }),
+		).toThrow(expect.objectContaining({ code: "E_NOVA_INVALID_OPTION" }));
 	});
 });

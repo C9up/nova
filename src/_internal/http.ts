@@ -11,7 +11,7 @@
  * request Nova builds goes out through that client.
  */
 
-import { NovaError } from "../errors.js";
+import { E_NOVA_HTTP_CLIENT_MISSING } from "../errors.js";
 
 /** One push request, as Nova builds it (`_internal/webpush.ts`). */
 export interface PushHttpRequest {
@@ -38,7 +38,7 @@ export interface PushHttpClient {
 	request(url: string, options: PushHttpRequest): Promise<PushHttpResponse>;
 }
 
-/** Why the client gave up, as `HttpClientError.reason` names it. */
+/** Why the client gave up. */
 export type TransportFailure =
 	| "invalidUrl"
 	| "privateAddress"
@@ -47,27 +47,28 @@ export type TransportFailure =
 	| "tooLarge"
 	| "redirect";
 
+/** The code each failure carries in `@c9up/ream`'s HTTP client. */
+const FAILURE_BY_CODE: Readonly<Record<string, TransportFailure>> = {
+	E_HTTP_CLIENT_INVALID_URL: "invalidUrl",
+	E_HTTP_CLIENT_PRIVATE_ADDRESS: "privateAddress",
+	E_HTTP_CLIENT_UNREACHABLE: "unreachable",
+	E_HTTP_CLIENT_TIMED_OUT: "timedOut",
+	E_HTTP_CLIENT_TOO_LARGE: "tooLarge",
+	E_HTTP_CLIENT_REDIRECT_REFUSED: "redirect",
+};
+
 /**
- * The reason carried by an `HttpClientError`, or undefined for anything else.
- * Read structurally: the class lives in an optional peer, and an injected
- * client may come from a different copy of it.
+ * Why `@c9up/ream`'s HTTP client gave up, read from its `E_HTTP_CLIENT_*`
+ * code, or undefined for any other error. Read structurally: the client lives
+ * in an optional peer, and an injected client may come from a different copy
+ * of it.
  */
 export function transportFailure(error: unknown): TransportFailure | undefined {
-	if (!(error instanceof Error) || error.name !== "HttpClientError") {
+	if (!(error instanceof Error)) return undefined;
+	const code: unknown = Reflect.get(error, "code");
+	if (typeof code !== "string" || !Object.hasOwn(FAILURE_BY_CODE, code))
 		return undefined;
-	}
-	const reason: unknown = Reflect.get(error, "reason");
-	switch (reason) {
-		case "invalidUrl":
-		case "privateAddress":
-		case "unreachable":
-		case "timedOut":
-		case "tooLarge":
-		case "redirect":
-			return reason;
-		default:
-			return undefined;
-	}
+	return FAILURE_BY_CODE[code];
 }
 
 export interface DefaultClientOptions {
@@ -115,14 +116,13 @@ function isPushHttpClient(value: unknown): value is PushHttpClient {
 	);
 }
 
-function missingClient(detail: string, cause?: unknown): NovaError {
-	return new NovaError(
-		"E_NOVA_HTTP_CLIENT_MISSING",
-		`Sending a push needs the outbound HTTP client from @c9up/ream, ${detail}.`,
-		{
-			hint: "Install @c9up/ream (^0.2.29), or pass your own client as `http` in the Nova options.",
-			cause,
-		},
+function missingClient(
+	detail: string,
+	cause?: unknown,
+): E_NOVA_HTTP_CLIENT_MISSING {
+	return new E_NOVA_HTTP_CLIENT_MISSING(
+		detail,
+		cause === undefined ? undefined : { cause },
 	);
 }
 

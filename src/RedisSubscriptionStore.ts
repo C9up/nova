@@ -51,7 +51,11 @@ import {
 	isSubscriptionFields,
 	subscriptionProblem,
 } from "./_internal/subscription.js";
-import { NovaError } from "./errors.js";
+import {
+	E_NOVA_INVALID_PREFIX,
+	E_NOVA_INVALID_SUBSCRIPTION,
+	E_NOVA_STORE_BUSY,
+} from "./errors.js";
 import type {
 	PushSubscription,
 	SaveSubscriptionOptions,
@@ -237,10 +241,7 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 	) {
 		const prefix = options.prefix ?? "nova:push";
 		if (prefix.includes(" ")) {
-			throw new NovaError(
-				"E_NOVA_INVALID_PREFIX",
-				`Invalid key prefix "${prefix}" — a Redis key cannot contain a space.`,
-			);
+			throw new E_NOVA_INVALID_PREFIX([prefix]);
 		}
 		this.#source = redis;
 		this.#prefix = prefix;
@@ -299,13 +300,7 @@ export class RedisSubscriptionStore implements SubscriptionStore {
 			auth: subscription.keys.auth,
 		});
 		if (problem !== null) {
-			throw new NovaError(
-				"E_NOVA_INVALID_SUBSCRIPTION",
-				`This subscription cannot be stored: ${problem}.`,
-				{
-					hint: "Subscriptions arriving through the subscribe endpoint are already checked; a hand-built one has to hold the same values a browser sends.",
-				},
-			);
+			throw new E_NOVA_INVALID_SUBSCRIPTION(problem);
 		}
 
 		const redis = await this.#redis();
@@ -531,14 +526,8 @@ function pairs(reply: unknown): Member[] {
 	return members;
 }
 
-function busy(): NovaError {
-	return new NovaError(
-		"E_NOVA_STORE_BUSY",
-		`A subscription changed under every one of ${ATTEMPTS} attempts to write it.`,
-		{
-			hint: "Something rewrites this endpoint's record continuously; retry later.",
-		},
-	);
+function busy(): E_NOVA_STORE_BUSY {
+	return new E_NOVA_STORE_BUSY(ATTEMPTS);
 }
 
 /**

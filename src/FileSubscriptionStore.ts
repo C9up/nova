@@ -26,7 +26,10 @@ import { dirname, resolve } from "node:path";
 import { assertMayTakeOver } from "./_internal/ownership.js";
 import { overCap, perUserCap } from "./_internal/per-user-cap.js";
 import { subscriptionProblem } from "./_internal/subscription.js";
-import { NovaError } from "./errors.js";
+import {
+	E_NOVA_INVALID_SUBSCRIPTION,
+	E_NOVA_STORE_FILE_UNREADABLE,
+} from "./errors.js";
 import type {
 	PushSubscription,
 	SaveSubscriptionOptions,
@@ -84,13 +87,7 @@ export class FileSubscriptionStore implements SubscriptionStore {
 			auth: subscription.keys.auth,
 		});
 		if (problem !== null) {
-			throw new NovaError(
-				"E_NOVA_INVALID_SUBSCRIPTION",
-				`This subscription cannot be stored: ${problem}.`,
-				{
-					hint: "Subscriptions arriving through the subscribe endpoint are already checked; a hand-built one has to hold the same values a browser sends.",
-				},
-			);
+			throw new E_NOVA_INVALID_SUBSCRIPTION(problem);
 		}
 
 		await this.#mutate((file) => {
@@ -196,24 +193,14 @@ export class FileSubscriptionStore implements SubscriptionStore {
 		try {
 			parsed = JSON.parse(raw);
 		} catch (cause) {
-			throw new NovaError(
-				"E_NOVA_STORE_FILE_UNREADABLE",
-				`${this.#path} is not valid JSON, so the subscriptions it holds cannot be read.`,
-				{
-					hint: "Fix or move the file. Starting from empty would overwrite it on the next subscribe.",
-					cause,
-				},
-			);
+			throw new E_NOVA_STORE_FILE_UNREADABLE(this.#path, undefined, { cause });
 		}
 
 		forgetUnholdableExpiries(parsed);
 		if (!isStoreFile(parsed)) {
-			throw new NovaError(
-				"E_NOVA_STORE_FILE_UNREADABLE",
-				`${this.#path} is JSON but not a usable subscription store: ${storeFileProblem(parsed)}.`,
-				{
-					hint: 'Expected { "version": 1, "subscriptions": { "<endpoint>": { "userId": "…", "expirationTime": null, "p256dh": "…", "auth": "…" } } }. Fix or move the file — reading it as empty would overwrite the subscriptions it still holds.',
-				},
+			throw new E_NOVA_STORE_FILE_UNREADABLE(
+				this.#path,
+				storeFileProblem(parsed) ?? "unexpected shape",
 			);
 		}
 		return parsed;

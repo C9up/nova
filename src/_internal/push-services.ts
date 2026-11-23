@@ -12,6 +12,7 @@
  */
 
 import { isIP } from "node:net";
+import { E_NOVA_INVALID_OPTION } from "../errors.js";
 
 /**
  * The push services of the browsers in use: Chrome, Edge (Chromium), Opera,
@@ -58,9 +59,9 @@ function normaliseEntry(entry: string, option: string): string {
 	// A leading dot or wildcard would read as "any subdomain", which every
 	// entry already means; an empty one would match everything.
 	if (value === "" || value.startsWith(".") || value.includes("*")) {
-		throw new TypeError(
-			`[nova] invalid delivery option \`${option}\`: "${String(entry)}" is not a host name`,
-		);
+		throw new E_NOVA_INVALID_OPTION([
+			`delivery option \`${option}\`: "${String(entry)}" is not a host name`,
+		]);
 	}
 	return value;
 }

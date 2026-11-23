@@ -118,7 +118,7 @@ describe("nova > store selection", () => {
 				stores: { memory: stores.memory() },
 			});
 		} catch (error) {
-			expect(error).toMatchObject({ hint: expect.stringContaining("memory") });
+			expect(error).toMatchObject({ help: expect.stringContaining("memory") });
 		}
 	});
 

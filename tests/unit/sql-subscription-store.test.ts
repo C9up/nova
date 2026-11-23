@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-	NovaError,
+	errors,
 	SqlSubscriptionStore,
 	type SubscriptionDatabase,
 } from "../../src/index.js";
@@ -123,7 +123,7 @@ describe("nova > SqlSubscriptionStore", () => {
 		// It reaches the SQL as an identifier, where a parameter cannot go.
 		expect(
 			() => new SqlSubscriptionStore(db, { table: "subs; DROP TABLE users" }),
-		).toThrow(NovaError);
+		).toThrow(errors.E_NOVA_INVALID_TABLE);
 		expect(
 			() => new SqlSubscriptionStore(db, { table: "my_subscriptions" }),
 		).not.toThrow();

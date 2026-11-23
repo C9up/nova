@@ -23,6 +23,10 @@
  */
 
 import { pushToUserKey } from "../_internal/user-id.js";
+import {
+	E_NOVA_ASSERTION_FAILED,
+	E_NOVA_INVALID_PREDICATE,
+} from "../errors.js";
 import type {
 	PushOptions,
 	PushPayload,
@@ -130,18 +134,20 @@ export class FakeNova {
 	assertPushed(predicate: FakeNovaPredicateArg): void {
 		const match = makeMatcher(predicate);
 		if (this.#captured.some(match)) return;
-		throw new Error(
-			`FakeNova.assertPushed() failed — no captured push matches ${describePredicate(predicate)}.\n${describeCaptured(this.#captured)}`,
-		);
+		throw new E_NOVA_ASSERTION_FAILED([
+			"assertPushed",
+			`no captured push matches ${describePredicate(predicate)}.\n${describeCaptured(this.#captured)}`,
+		]);
 	}
 
 	assertNotPushed(predicate: FakeNovaPredicateArg): void {
 		const match = makeMatcher(predicate);
 		const found = this.#captured.find(match);
 		if (!found) return;
-		throw new Error(
-			`FakeNova.assertNotPushed() failed — at least one captured push matches ${describePredicate(predicate)}.\n${describeCaptured(this.#captured)}`,
-		);
+		throw new E_NOVA_ASSERTION_FAILED([
+			"assertNotPushed",
+			`at least one captured push matches ${describePredicate(predicate)}.\n${describeCaptured(this.#captured)}`,
+		]);
 	}
 }
 
@@ -151,9 +157,7 @@ function makeMatcher(
 	if (typeof predicate === "function") return predicate;
 	const p = predicate;
 	if (p.containing !== undefined && p.containing === "") {
-		throw new Error(
-			"FakeNova: `containing` predicate cannot be an empty string — it would match every captured push. Pass a non-empty needle.",
-		);
+		throw new E_NOVA_INVALID_PREDICATE();
 	}
 	return (c) => {
 		// userId only matches fan-out captures; endpoint only matches single.

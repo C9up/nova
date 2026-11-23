@@ -9,6 +9,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import {
+	errors,
 	MemorySubscriptionDriver,
 	Nova,
 	type PushOptions,
@@ -112,7 +113,8 @@ describe("FakeNova — pushToUser() capture", () => {
 			.pushToUser(id, welcomePayload())
 			.catch((e) => e);
 
-		expect(fakeError).toBeInstanceOf(TypeError);
+		expect(fakeError).toBeInstanceOf(errors.E_NOVA_INVALID_USER_ID);
+		expect(fakeError).toMatchObject({ code: "E_NOVA_INVALID_USER_ID" });
 		expect(fakeError).toEqual(realError);
 		expect(fake.getPushed()).toEqual([]);
 	});
@@ -205,6 +207,9 @@ describe("FakeNova — assertPushed (object predicate)", () => {
 		expect(() => fake.assertPushed({ userId: "user-A" })).toThrow(
 			/no captured push matches/,
 		);
+		expect(() => fake.assertPushed({ userId: "user-A" })).toThrow(
+			expect.objectContaining({ code: "E_NOVA_ASSERTION_FAILED" }),
+		);
 	});
 
 	it("endpoint predicate does NOT match fan-out captures", async () => {
@@ -254,6 +259,9 @@ describe("FakeNova — assertPushed (object predicate)", () => {
 		await fake.pushToUser("user-A", welcomePayload());
 		expect(() => fake.assertPushed({ containing: "" })).toThrow(
 			/`containing` predicate cannot be an empty string/,
+		);
+		expect(() => fake.assertPushed({ containing: "" })).toThrow(
+			expect.objectContaining({ code: "E_NOVA_INVALID_PREDICATE" }),
 		);
 	});
 
@@ -305,6 +313,9 @@ describe("FakeNova — assertNotPushed", () => {
 		await fake.pushToUser("user-A", welcomePayload());
 		expect(() => fake.assertNotPushed({ userId: "user-A" })).toThrow(
 			/at least one captured push matches/,
+		);
+		expect(() => fake.assertNotPushed({ userId: "user-A" })).toThrow(
+			expect.objectContaining({ code: "E_NOVA_ASSERTION_FAILED" }),
 		);
 	});
 });

@@ -112,13 +112,24 @@ export function fakePushHttp(): FakePushHttp {
 	return fake;
 }
 
+const CODE_BY_FAILURE: Readonly<Record<TransportFailure, string>> = {
+	invalidUrl: "E_HTTP_CLIENT_INVALID_URL",
+	privateAddress: "E_HTTP_CLIENT_PRIVATE_ADDRESS",
+	unreachable: "E_HTTP_CLIENT_UNREACHABLE",
+	timedOut: "E_HTTP_CLIENT_TIMED_OUT",
+	tooLarge: "E_HTTP_CLIENT_TOO_LARGE",
+	redirect: "E_HTTP_CLIENT_REDIRECT_REFUSED",
+};
+
 /**
  * A transport failure shaped like the one the framework's client throws:
- * Nova reads it structurally, by name and `reason`.
+ * Nova reads it structurally, by its `E_HTTP_CLIENT_*` code.
  */
 export function transportError(reason: TransportFailure, url: string): Error {
 	const error = new Error(`transport failure (${reason}) for ${url}`);
-	error.name = "HttpClientError";
-	Object.defineProperty(error, "reason", { value: reason, enumerable: true });
+	Object.defineProperty(error, "code", {
+		value: CODE_BY_FAILURE[reason],
+		enumerable: true,
+	});
 	return error;
 }

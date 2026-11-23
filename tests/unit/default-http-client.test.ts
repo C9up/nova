@@ -96,7 +96,6 @@ describe("defaultHttpClient — loading the guarded client", () => {
 	it("names the missing peer when it cannot be imported", async () => {
 		const failure = defaultHttpClient({}, failingLoader);
 		await expect(failure).rejects.toMatchObject({
-			name: "NovaError",
 			code: "E_NOVA_HTTP_CLIENT_MISSING",
 			message: expect.stringContaining("not installed"),
 			cause: expect.objectContaining({

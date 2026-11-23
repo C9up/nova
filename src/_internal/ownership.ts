@@ -13,7 +13,7 @@
  */
 
 import { timingSafeEqual } from "node:crypto";
-import { NovaError } from "../errors.js";
+import { E_NOVA_SUBSCRIPTION_CONFLICT } from "../errors.js";
 
 interface Keys {
 	p256dh: string;
@@ -38,13 +38,7 @@ export function assertMayTakeOver(
 	const p256dhMatches = same(current.keys.p256dh, keys.p256dh);
 	const authMatches = same(current.keys.auth, keys.auth);
 	if (p256dhMatches && authMatches) return;
-	throw new NovaError(
-		"E_NOVA_SUBSCRIPTION_CONFLICT",
-		`The endpoint ${hostOf(endpoint)}/… is subscribed by another user with other keys.`,
-		{
-			hint: "A browser moving between accounts posts the same keys; different ones mean the poster does not hold this subscription.",
-		},
-	);
+	throw new E_NOVA_SUBSCRIPTION_CONFLICT(hostOf(endpoint));
 }
 
 function hostOf(endpoint: string): string {

@@ -1,3 +1,5 @@
+import { E_NOVA_INVALID_USER_ID } from "../errors.js";
+
 /**
  * A user id as the stores key it: text. Numbers and bigints are what an
  * auto-increment primary key arrives as; anything else — an empty string, NaN,
@@ -13,7 +15,7 @@ export function normaliseUserId(id: unknown): string | undefined {
 }
 
 /**
- * The id `pushToUser` looks up, or the TypeError it throws — one function, so
+ * The id `pushToUser` looks up, or the error it throws — one function, so
  * `FakeNova` fails on exactly the ids `Nova` fails on, with the same message.
  * A fake that recorded `"undefined"` would hide the unloaded relation the real
  * method was written to catch.
@@ -21,9 +23,9 @@ export function normaliseUserId(id: unknown): string | undefined {
 export function pushToUserKey(userId: unknown): string {
 	const key = normaliseUserId(userId);
 	if (key === undefined) {
-		throw new TypeError(
+		throw new E_NOVA_INVALID_USER_ID([
 			`[nova] pushToUser: ${String(userId)} is not a user id (a non-empty string or an integer)`,
-		);
+		]);
 	}
 	return key;
 }

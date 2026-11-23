@@ -7,6 +7,13 @@
  */
 
 import { decodeBase64Url } from "../_internal/base64url.js";
+import {
+	E_NOVA_ENDPOINT_REJECTED,
+	E_NOVA_PUSH_SUBSCRIBE_FAILED,
+	E_NOVA_SERVICE_WORKER_UNSUPPORTED,
+} from "./errors.js";
+
+export * as errors from "./errors.js";
 
 export interface SubscribeOptions {
 	/** Endpoint to POST the subscription to. Default: `/api/nova/subscribe`. */
@@ -33,21 +40,6 @@ export interface RegisterServiceWorkerOptions {
 	scope?: string;
 }
 
-export class NovaClientError extends Error {
-	readonly status?: number;
-	readonly responseBody?: string;
-
-	constructor(
-		message: string,
-		options?: { status?: number; responseBody?: string },
-	) {
-		super(message);
-		this.name = "NovaClientError";
-		this.status = options?.status;
-		this.responseBody = options?.responseBody;
-	}
-}
-
 /**
  * Register a Service Worker. Returns the `ServiceWorkerRegistration` so the
  * caller can chain `.update()`, listen for `updatefound`, etc.
@@ -60,9 +52,7 @@ export async function registerServiceWorker(
 	options: RegisterServiceWorkerOptions = {},
 ): Promise<ServiceWorkerRegistration> {
 	if (typeof navigator === "undefined" || !navigator.serviceWorker) {
-		throw new NovaClientError(
-			"Service Workers are not supported in this environment. Did you call this from a non-browser context?",
-		);
+		throw new E_NOVA_SERVICE_WORKER_UNSUPPORTED();
 	}
 	return navigator.serviceWorker.register(path, {
 		scope: options.scope ?? "/",
@@ -75,17 +65,16 @@ export async function registerServiceWorker(
  *  2. Call `pushManager.subscribe({ userVisibleOnly, applicationServerKey })`.
  *  3. POST the resulting `PushSubscription.toJSON()` to the Nova endpoint.
  *
- * Returns the `PushSubscription` on success; throws `NovaClientError` on a
- * non-2xx HTTP response or a missing browser API.
+ * Returns the `PushSubscription` on success; throws `E_NOVA_ENDPOINT_REJECTED` on a
+ * non-2xx HTTP response, `E_NOVA_SERVICE_WORKER_UNSUPPORTED` on a missing
+ * browser API.
  */
 export async function subscribe(
 	vapidPublicKey: string,
 	options: SubscribeOptions = {},
 ): Promise<PushSubscription> {
 	if (typeof navigator === "undefined" || !navigator.serviceWorker) {
-		throw new NovaClientError(
-			"Service Workers are not supported in this environment.",
-		);
+		throw new E_NOVA_SERVICE_WORKER_UNSUPPORTED();
 	}
 	const registration = await navigator.serviceWorker.ready;
 	// Copy into a fresh ArrayBuffer-backed view: the DOM type for
@@ -103,9 +92,7 @@ export async function subscribe(
 	} catch (cause) {
 		const name = cause instanceof Error ? cause.name : "UnknownError";
 		const message = cause instanceof Error ? cause.message : String(cause);
-		throw new NovaClientError(
-			`pushManager.subscribe failed: ${name} — ${message}`,
-		);
+		throw new E_NOVA_PUSH_SUBSCRIBE_FAILED([name, message], { cause });
 	}
 
 	const target = options.endpoint ?? "/api/nova/subscribe";
@@ -118,10 +105,7 @@ export async function subscribe(
 	});
 	if (response.status !== 201) {
 		const responseBody = await response.text().catch(() => "");
-		throw new NovaClientError(
-			`Nova subscribe endpoint responded ${response.status} ${response.statusText} (expected 201)`,
-			{ status: response.status, responseBody },
-		);
+		throw new E_NOVA_ENDPOINT_REJECTED("subscribe", response, responseBody);
 	}
 	return pushSubscription;
 }
@@ -136,22 +120,20 @@ export async function subscribe(
  *     behind at the next push.
  *
  * Resolves `false` when the browser held no subscription, `true` once it is
- * dropped; throws `NovaClientError` when the server refused (after dropping it).
+ * dropped; throws `E_NOVA_ENDPOINT_REJECTED` when the server refused (after dropping it).
  * Takes the same options as `subscribe()`.
  */
 export async function unsubscribe(
 	options: SubscribeOptions = {},
 ): Promise<boolean> {
 	if (typeof navigator === "undefined" || !navigator.serviceWorker) {
-		throw new NovaClientError(
-			"Service Workers are not supported in this environment.",
-		);
+		throw new E_NOVA_SERVICE_WORKER_UNSUPPORTED();
 	}
 	const registration = await navigator.serviceWorker.ready;
 	const current = await registration.pushManager.getSubscription();
 	if (current === null) return false;
 
-	let failure: NovaClientError | undefined;
+	let failure: E_NOVA_ENDPOINT_REJECTED | undefined;
 	try {
 		const response = await fetch(options.endpoint ?? "/api/nova/subscribe", {
 			method: "DELETE",
@@ -161,9 +143,10 @@ export async function unsubscribe(
 		});
 		if (!response.ok && response.status !== 404) {
 			const responseBody = await response.text().catch(() => "");
-			failure = new NovaClientError(
-				`Nova unsubscribe endpoint responded ${response.status} ${response.statusText}`,
-				{ status: response.status, responseBody },
+			failure = new E_NOVA_ENDPOINT_REJECTED(
+				"unsubscribe",
+				response,
+				responseBody,
 			);
 		}
 	} finally {

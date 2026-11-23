@@ -35,6 +35,7 @@ import {
 	type PushRequestOptions,
 } from "./_internal/webpush.js";
 import type { NovaVapidConfig } from "./config.js";
+import { E_NOVA_INVALID_OPTION } from "./errors.js";
 import type {
 	PushSubscription,
 	SubscriptionStore,
@@ -422,9 +423,9 @@ function positiveInteger(
 ): number {
 	if (input === undefined) return fallback;
 	if (!Number.isSafeInteger(input) || input <= 0) {
-		throw new TypeError(
-			`[nova] invalid delivery option \`${option}\`: expected a positive integer, got ${String(input)}`,
-		);
+		throw new E_NOVA_INVALID_OPTION([
+			`delivery option \`${option}\`: expected a positive integer, got ${String(input)}`,
+		]);
 	}
 	return input;
 }
@@ -462,9 +463,9 @@ function resolveTtl(input: number | undefined): number {
 		!Number.isInteger(input) ||
 		input < 0
 	) {
-		throw new TypeError(
-			`[nova] invalid push option \`ttl\`: expected a non-negative integer (seconds), got ${String(input)}`,
-		);
+		throw new E_NOVA_INVALID_OPTION([
+			`push option \`ttl\`: expected a non-negative integer (seconds), got ${String(input)}`,
+		]);
 	}
 	return input;
 }
@@ -473,9 +474,9 @@ function resolveTopic(input: string | undefined): string | undefined {
 	if (input === undefined) return undefined;
 	if (typeof input !== "string" || input.length === 0) return undefined;
 	if (input.length > MAX_TOPIC_LENGTH || !TOPIC_CHARS.test(input)) {
-		throw new TypeError(
-			`[nova] invalid push option \`topic\`: expected ≤ ${MAX_TOPIC_LENGTH} chars from the base64url alphabet (RFC 8030 §5.4), got "${input}"`,
-		);
+		throw new E_NOVA_INVALID_OPTION([
+			`push option \`topic\`: expected ≤ ${MAX_TOPIC_LENGTH} chars from the base64url alphabet (RFC 8030 §5.4), got "${input}"`,
+		]);
 	}
 	return input;
 }

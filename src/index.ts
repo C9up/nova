@@ -7,7 +7,7 @@ export {
 	type NovaRouteMiddleware,
 	type NovaVapidConfig,
 } from "./config.js";
-export { NovaError } from "./errors.js";
+export * as errors from "./errors.js";
 export { FileSubscriptionStore } from "./FileSubscriptionStore.js";
 export {
 	Nova,

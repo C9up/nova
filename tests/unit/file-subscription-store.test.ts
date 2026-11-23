@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { FileSubscriptionStore, NovaError } from "../../src/index.js";
+import { errors, FileSubscriptionStore } from "../../src/index.js";
 import {
 	keyOfLength,
 	realAuth,
@@ -88,7 +88,7 @@ describe("nova > FileSubscriptionStore", () => {
 		await store.save("user-A", subscription("https://push.example/one"));
 		await writeFile(path, "{not json", "utf8");
 		await expect(store.save("user-A", subscription("x"))).rejects.toThrow(
-			NovaError,
+			errors.E_NOVA_INVALID_SUBSCRIPTION,
 		);
 
 		// The queue must not inherit that rejection — the next write, on a file

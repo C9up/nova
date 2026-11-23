@@ -4,7 +4,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-	NovaClientError,
+	errors,
 	registerServiceWorker,
 	subscribe,
 	unsubscribe,
@@ -102,13 +102,13 @@ describe("nova > client > registerServiceWorker", () => {
 		expect(registerSpy).toHaveBeenCalledWith("/custom-sw.js", { scope: "/" });
 	});
 
-	it("throws NovaClientError when serviceWorker is unavailable", async () => {
+	it("throws E_NOVA_SERVICE_WORKER_UNSUPPORTED when serviceWorker is unavailable", async () => {
 		Object.defineProperty(globalThis.navigator, "serviceWorker", {
 			configurable: true,
 			value: undefined,
 		});
 		await expect(registerServiceWorker()).rejects.toBeInstanceOf(
-			NovaClientError,
+			errors.E_NOVA_SERVICE_WORKER_UNSUPPORTED,
 		);
 	});
 });
@@ -228,7 +228,7 @@ describe("nova > client > subscribe", () => {
 		});
 	});
 
-	it("throws NovaClientError on non-2xx response", async () => {
+	it("throws E_NOVA_ENDPOINT_REJECTED on non-2xx response", async () => {
 		const subscription: SubscriptionStub = { toJSON: () => SAMPLE_PUSH };
 		installNavigatorMocks({ subscription });
 		vi.stubGlobal(
@@ -241,18 +241,20 @@ describe("nova > client > subscribe", () => {
 		);
 
 		await expect(subscribe(VAPID_KEY)).rejects.toMatchObject({
-			name: "NovaClientError",
+			code: "E_NOVA_ENDPOINT_REJECTED",
 			status: 401,
 			responseBody: "nope",
 		});
 	});
 
-	it("throws NovaClientError when serviceWorker is unavailable", async () => {
+	it("throws E_NOVA_SERVICE_WORKER_UNSUPPORTED when serviceWorker is unavailable", async () => {
 		Object.defineProperty(globalThis.navigator, "serviceWorker", {
 			configurable: true,
 			value: undefined,
 		});
-		await expect(subscribe(VAPID_KEY)).rejects.toBeInstanceOf(NovaClientError);
+		await expect(subscribe(VAPID_KEY)).rejects.toBeInstanceOf(
+			errors.E_NOVA_SERVICE_WORKER_UNSUPPORTED,
+		);
 	});
 });
 
@@ -327,7 +329,7 @@ describe("nova > client > unsubscribe", () => {
 		);
 
 		await expect(unsubscribe()).rejects.toMatchObject({
-			name: "NovaClientError",
+			code: "E_NOVA_ENDPOINT_REJECTED",
 			status: 401,
 		});
 		// A dead endpoint is cleaned server-side at its next push (410).
